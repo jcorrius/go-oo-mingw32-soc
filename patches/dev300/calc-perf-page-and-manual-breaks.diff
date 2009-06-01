@@ -1,5 +1,5 @@
 diff --git sc/inc/document.hxx sc/inc/document.hxx
-index 2b1c371..8d419ef 100644
+index 986bde8..c3e15ea 100644
 --- sc/inc/document.hxx
 +++ sc/inc/document.hxx
 @@ -47,6 +47,7 @@
@@ -10,7 +10,7 @@ index 2b1c371..8d419ef 100644
  
  class KeyEvent;
  class OutputDevice;
-@@ -155,6 +156,9 @@ namespace com { namespace sun { namespace star {
+@@ -156,6 +157,9 @@ namespace com { namespace sun { namespace star {
      namespace embed {
          class XEmbeddedObject;
      }
@@ -20,7 +20,7 @@ index 2b1c371..8d419ef 100644
  } } }
  
  namespace com { namespace sun { namespace star { namespace document {
-@@ -1291,6 +1295,24 @@ public:
+@@ -1296,6 +1300,24 @@ public:
      SC_DLLPUBLIC const ScBitMaskCompressedArray< SCROW, BYTE> & GetRowFlagsArray( SCTAB nTab ) const;
      SC_DLLPUBLIC       ScBitMaskCompressedArray< SCROW, BYTE> & GetRowFlagsArrayModifiable( SCTAB nTab );
  
@@ -45,6 +45,14 @@ index 2b1c371..8d419ef 100644
                      /// @return  the index of the last row with any set flags (auto-pagebreak is ignored).
  	SC_DLLPUBLIC SCROW			GetLastFlaggedRow( SCTAB nTab ) const;
  
+@@ -1335,6 +1357,7 @@ public:
+ 	Size			GetPageSize( SCTAB nTab ) const;
+ 	void			SetPageSize( SCTAB nTab, const Size& rSize );
+ 	void			SetRepeatArea( SCTAB nTab, SCCOL nStartCol, SCCOL nEndCol, SCROW nStartRow, SCROW nEndRow );
++    void            InvalidatePageBreaks(SCTAB nTab);
+ 	void			UpdatePageBreaks( SCTAB nTab, const ScRange* pUserArea = NULL );
+ 	void			RemoveManualBreaks( SCTAB nTab );
+ 	BOOL			HasManualBreaks( SCTAB nTab ) const;
 diff --git sc/inc/global.hxx sc/inc/global.hxx
 index b2d6e50..61d748d 100644
 --- sc/inc/global.hxx
@@ -70,10 +78,11 @@ index b2d6e50..61d748d 100644
  // Insert-/Delete-Flags
  const USHORT IDF_NONE       = 0x0000;
 diff --git sc/inc/table.hxx sc/inc/table.hxx
-index 1bd2d98..b0cd5d7 100644
+index ea24628..bfc4bf2 100644
 --- sc/inc/table.hxx
 +++ sc/inc/table.hxx
-@@ -41,11 +41,18 @@
+@@ -40,12 +40,19 @@
+ #include "compressedarray.hxx"
  
  #include <memory>
 +#include <set>
@@ -92,9 +101,9 @@ index 1bd2d98..b0cd5d7 100644
  class SfxItemSet;
  class SfxStyleSheetBase;
  class SvxBoxInfoItem;
-@@ -118,6 +125,11 @@ private:
+@@ -115,6 +122,11 @@ private:
+ 	BYTE*			pColFlags;
  	ScBitMaskCompressedArray< SCROW, BYTE>*     pRowFlags;
-     ::boost::shared_ptr<ScFlatBoolRowSegments>  mpHiddenRows;
  
 +    ::std::set<SCROW>                      maRowPageBreaks;
 +    ::std::set<SCROW>                      maRowManualBreaks;
@@ -104,7 +113,25 @@ index 1bd2d98..b0cd5d7 100644
  	ScOutlineTable*	pOutlineTable;
  
  	SCCOL			nTableAreaX;
-@@ -602,6 +614,21 @@ public:
+@@ -150,6 +162,7 @@ private:
+ 	Color			aScenarioColor;
+ 	USHORT			nScenarioFlags;
+ 	BOOL			bActiveScenario;
++    bool            mbPageBreaksValid;
+ 
+ friend class ScDocument;					// fuer FillInfo
+ friend class ScDocumentIterator;
+@@ -337,7 +350,8 @@ public:
+ 
+ 	void		CopyUpdated( const ScTable* pPosTab, ScTable* pDestTab ) const;
+ 
+-	void		InvalidateTableArea()						{ bTableAreaValid = FALSE; }
++    void        InvalidateTableArea();
++    void        InvalidatePageBreaks();
+ 
+ 	BOOL		GetCellArea( SCCOL& rEndCol, SCROW& rEndRow ) const;			// FALSE = leer
+ 	BOOL		GetTableArea( SCCOL& rEndCol, SCROW& rEndRow ) const;
+@@ -598,6 +612,21 @@ public:
  	void		RemoveManualBreaks();
  	BOOL		HasManualBreaks() const;
  
@@ -127,7 +154,7 @@ index 1bd2d98..b0cd5d7 100644
  	void		ExtendHidden( SCCOL& rX1, SCROW& rY1, SCCOL& rX2, SCROW& rY2 );
  
 diff --git sc/source/core/data/document.cxx sc/source/core/data/document.cxx
-index 412272b..e882403 100644
+index 13c9e66..98001ef 100644
 --- sc/source/core/data/document.cxx
 +++ sc/source/core/data/document.cxx
 @@ -54,6 +54,7 @@
@@ -138,8 +165,8 @@ index 412272b..e882403 100644
  
  #include "document.hxx"
  #include "table.hxx"
-@@ -99,6 +100,9 @@
- #include <map>
+@@ -103,6 +104,9 @@
+ using namespace ::com::sun::star;
  
  namespace WritingMode2 = ::com::sun::star::text::WritingMode2;
 +using ::com::sun::star::uno::Sequence;
@@ -148,7 +175,7 @@ index 412272b..e882403 100644
  
  struct ScDefaultAttr
  {
-@@ -3184,6 +3188,102 @@ const ScBitMaskCompressedArray< SCROW, BYTE> & ScDocument::GetRowFlagsArray(
+@@ -3189,6 +3193,102 @@ const ScBitMaskCompressedArray< SCROW, BYTE> & ScDocument::GetRowFlagsArray(
  	return *pFlags;
  }
  
@@ -251,11 +278,191 @@ index 412272b..e882403 100644
  
  SCROW ScDocument::GetLastFlaggedRow( SCTAB nTab ) const
  {
+@@ -4569,6 +4669,11 @@ void ScDocument::SetRepeatArea( SCTAB nTab, SCCOL nStartCol, SCCOL nEndCol, SCRO
+ 		pTab[nTab]->SetRepeatArea( nStartCol, nEndCol, nStartRow, nEndRow );
+ }
+ 
++void ScDocument::InvalidatePageBreaks(SCTAB nTab)
++{
++    if (ValidTab(nTab) && pTab[nTab])
++        pTab[nTab]->InvalidatePageBreaks();
++}
+ 
+ void ScDocument::UpdatePageBreaks( SCTAB nTab, const ScRange* pUserArea )
+ {
+diff --git sc/source/core/data/table1.cxx sc/source/core/data/table1.cxx
+index ddd1bbb..51c3e5e 100644
+--- sc/source/core/data/table1.cxx
++++ sc/source/core/data/table1.cxx
+@@ -155,7 +155,8 @@ ScTable::ScTable( ScDocument* pDoc, SCTAB nNewTab, const String& rNewName,
+ 	pScenarioRanges( NULL ),
+ 	aScenarioColor( COL_LIGHTGRAY ),
+ 	nScenarioFlags( 0 ),
+-	bActiveScenario( FALSE )
++	bActiveScenario( FALSE ),
++    mbPageBreaksValid(false)
+ {
+ 
+ 	if (bColInfo)
 diff --git sc/source/core/data/table2.cxx sc/source/core/data/table2.cxx
-index 0bddc24..a1b421b 100644
+index 5a78469..151e3d7 100644
 --- sc/source/core/data/table2.cxx
 +++ sc/source/core/data/table2.cxx
-@@ -2553,7 +2553,7 @@ SCROW ScTable::GetLastFlaggedRow() const
+@@ -137,6 +137,8 @@ void ScTable::InsertRow( SCCOL nStartCol, SCCOL nEndCol, SCROW nStartRow, SCSIZE
+ 		aCol[j].InsertRow( nStartRow, nSize );
+ 	if( !--nRecalcLvl )
+ 		SetDrawPageSize();
++
++    InvalidatePageBreaks();
+ }
+ 
+ 
+@@ -164,6 +166,8 @@ void ScTable::DeleteRow( SCCOL nStartCol, SCCOL nEndCol, SCROW nStartRow, SCSIZE
+     }
+ 	if( !--nRecalcLvl )
+ 		SetDrawPageSize();
++
++    InvalidatePageBreaks();
+ }
+ 
+ 
+@@ -230,6 +234,8 @@ void ScTable::InsertCol( SCCOL nStartCol, SCROW nStartRow, SCROW nEndRow, SCSIZE
+ 	}
+ 	if( !--nRecalcLvl )
+ 		SetDrawPageSize();
++
++    InvalidatePageBreaks();
+ }
+ 
+ 
+@@ -272,6 +278,8 @@ void ScTable::DeleteCol( SCCOL nStartCol, SCROW nStartRow, SCROW nEndRow, SCSIZE
+ 	}
+ 	if( !--nRecalcLvl )
+ 		SetDrawPageSize();
++
++    InvalidatePageBreaks();
+ }
+ 
+ 
+@@ -638,29 +646,39 @@ void ScTable::CopyToTable(SCCOL nCol1, SCROW nRow1, SCCOL nCol2, SCROW nRow2,
+ 			if (nRow1==0 && nRow2==MAXROW && pColWidth && pDestTab->pColWidth)
+ 				for (SCCOL i=nCol1; i<=nCol2; i++)
+ 				{
+-					BOOL bChange = pCharts &&
+-						( pDestTab->pColFlags[i] & CR_HIDDEN ) != ( pColFlags[i] & CR_HIDDEN );
++                    bool bHiddenChange = ( pDestTab->pColFlags[i] & CR_HIDDEN ) != ( pColFlags[i] & CR_HIDDEN );
++                    bool bChange = bHiddenChange || (pDestTab->pColWidth[i] != pColWidth[i]);
+ 					pDestTab->pColWidth[i] = pColWidth[i];
+ 					pDestTab->pColFlags[i] = pColFlags[i];
+ 					//!	Aenderungen zusammenfassen?
+-					if (bChange)
++					if (bHiddenChange && pCharts)
+ 						pCharts->SetRangeDirty(ScRange( i, 0, nTab, i, MAXROW, nTab ));
++
++                    if (bChange)
++                        pDestTab->InvalidatePageBreaks();
+ 				}
+ 
+ 			if (nCol1==0 && nCol2==MAXCOL && pRowHeight && pDestTab->pRowHeight)
+             {
++                bool bChange = pDestTab->pRowHeight->SumValues(nRow1, nRow2) != pRowHeight->SumValues(nRow1, nRow2);
++
++                if (bChange)
++                    pDestTab->InvalidatePageBreaks();
++
+                 pDestTab->pRowHeight->CopyFrom( *pRowHeight, nRow1, nRow2);
+ 				for (SCROW i=nRow1; i<=nRow2; i++)
+ 				{
+                     // TODO: might need some performance improvement, block
+                     // operations instead of single GetValue()/SetValue() calls.
+                     BYTE nThisRowFlags = pRowFlags->GetValue(i);
+-					BOOL bChange = pCharts &&
+-                        ( pDestTab->pRowFlags->GetValue(i) & CR_HIDDEN ) != ( nThisRowFlags & CR_HIDDEN );
++					bool bHiddenChange = ( pDestTab->pRowFlags->GetValue(i) & CR_HIDDEN ) != ( nThisRowFlags & CR_HIDDEN );
+                     pDestTab->pRowFlags->SetValue( i, nThisRowFlags );
+ 					//!	Aenderungen zusammenfassen?
+-					if (bChange)
++					if (bHiddenChange && pCharts)
+ 						pCharts->SetRangeDirty(ScRange( 0, i, nTab, MAXCOL, i, nTab ));
++
++                    if (bHiddenChange)
++                        pDestTab->InvalidatePageBreaks();
+ 				}
+             }
+ 
+@@ -711,6 +729,16 @@ void ScTable::CopyUpdated( const ScTable* pPosTab, ScTable* pDestTab ) const
+ 		aCol[i].CopyUpdated( pPosTab->aCol[i], pDestTab->aCol[i] );
+ }
+ 
++void ScTable::InvalidateTableArea()
++{
++    bTableAreaValid = FALSE;
++}
++
++void ScTable::InvalidatePageBreaks()
++{
++    mbPageBreaksValid = false;
++}
++
+ void ScTable::CopyScenarioTo( ScTable* pDestTab ) const
+ {
+ 	DBG_ASSERT( bScenario, "bScenario == FALSE" );
+@@ -1931,6 +1959,8 @@ void ScTable::SetColWidth( SCCOL nCol, USHORT nNewWidth )
+ 			pColWidth[nCol] = nNewWidth;
+ 			if( !--nRecalcLvl )
+ 				SetDrawPageSize();
++
++            InvalidatePageBreaks();
+ 		}
+ 	}
+ 	else
+@@ -1960,6 +1990,8 @@ void ScTable::SetRowHeight( SCROW nRow, USHORT nNewHeight )
+ 			pRowHeight->SetValue( nRow, nNewHeight);
+ 			if( !--nRecalcLvl )
+ 				SetDrawPageSize();
++
++            InvalidatePageBreaks();
+ 		}
+ 	}
+ 	else
+@@ -2041,6 +2073,9 @@ BOOL ScTable::SetRowHeightRange( SCROW nStartRow, SCROW nEndRow, USHORT nNewHeig
+ 		}
+ 		if( !--nRecalcLvl )
+ 			SetDrawPageSize();
++
++        if (bChanged)
++            InvalidatePageBreaks();
+ 	}
+ 	else
+ 	{
+@@ -2280,6 +2315,8 @@ void ScTable::ShowRow(SCROW nRow, BOOL bShow)
+ 			ScChartListenerCollection* pCharts = pDocument->GetChartListenerCollection();
+ 			if ( pCharts )
+ 				pCharts->SetRangeDirty(ScRange( 0, nRow, nTab, MAXCOL, nRow, nTab ));
++
++            InvalidatePageBreaks();
+ 		}
+ 	}
+ 	else
+@@ -2324,6 +2361,8 @@ void ScTable::DBShowRow(SCROW nRow, BOOL bShow)
+ 
+ 			if (pOutlineTable)
+ 				UpdateOutlineRow( nRow, nRow, bShow );
++
++            InvalidatePageBreaks();
+ 		}
+ 	}
+ 	else
+@@ -2421,6 +2460,8 @@ void ScTable::ShowRows(SCROW nRow1, SCROW nRow2, BOOL bShow)
+ 			ScChartListenerCollection* pCharts = pDocument->GetChartListenerCollection();
+ 			if ( pCharts )
+ 				pCharts->SetRangeDirty(ScRange( 0, nStartRow, nTab, MAXCOL, nEndRow, nTab ));
++
++            InvalidatePageBreaks();
+ 		}
+ 
+ 		nStartRow = nEndRow + 1;
+@@ -2496,7 +2537,7 @@ SCROW ScTable::GetLastFlaggedRow() const
  	if ( !pRowFlags )
  		return 0;
  
@@ -264,7 +471,7 @@ index 0bddc24..a1b421b 100644
  	return ValidRow(nLastFound) ? nLastFound : 0;
  }
  
-@@ -2565,7 +2565,7 @@ SCCOL ScTable::GetLastChangedCol() const
+@@ -2508,7 +2549,7 @@ SCCOL ScTable::GetLastChangedCol() const
  
  	SCCOL nLastFound = 0;
  	for (SCCOL nCol = 1; nCol <= MAXCOL; nCol++)
@@ -273,7 +480,7 @@ index 0bddc24..a1b421b 100644
  			nLastFound = nCol;
  
  	return nLastFound;
-@@ -2577,7 +2577,7 @@ SCROW ScTable::GetLastChangedRow() const
+@@ -2520,7 +2561,7 @@ SCROW ScTable::GetLastChangedRow() const
  	if ( !pRowFlags )
  		return 0;
  
@@ -307,7 +514,7 @@ index 5fca4bc..95f68fc 100644
  					if (bSpaceLeft)
  					{
 diff --git sc/source/core/data/table5.cxx sc/source/core/data/table5.cxx
-index 513464d..36544b5 100644
+index 3bb433c..618fe75 100644
 --- sc/source/core/data/table5.cxx
 +++ sc/source/core/data/table5.cxx
 @@ -53,8 +53,13 @@
@@ -324,7 +531,17 @@ index 513464d..36544b5 100644
  
  // STATIC DATA -----------------------------------------------------------
  
-@@ -82,7 +87,6 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
+@@ -68,6 +73,9 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
+ 	if ( !pUserArea && !bPageSizeValid )
+ 		return;
+ 
++    if (mbPageBreaksValid)
++        return;
++
+ 	SfxStyleSheetBase* pStyle = pDocument->GetStyleSheetPool()->
+ 									Find( aPageStyle, SFX_STYLE_FAMILY_PAGE );
+ 	if ( !pStyle )
+@@ -79,7 +87,6 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
  	const SfxPoolItem* pItem;
  
  	SCCOL nX;
@@ -332,7 +549,7 @@ index 513464d..36544b5 100644
  	SCCOL nStartCol = 0;
  	SCROW nStartRow = 0;
  	SCCOL nEndCol = MAXCOL;
-@@ -102,8 +106,9 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
+@@ -99,8 +106,9 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
  			//	bei mehreren Bereichen nichts anzeigen:
  
  			for (nX=0; nX<MAXCOL; nX++)
@@ -344,7 +561,7 @@ index 513464d..36544b5 100644
  
  			return;
  		}
-@@ -147,13 +152,13 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
+@@ -144,13 +152,13 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
  		//	Anfang: Breaks loeschen
  
  	for (nX=0; nX<nStartCol; nX++)
@@ -362,7 +579,7 @@ index 513464d..36544b5 100644
  
  		//	Mittelteil: Breaks verteilen
  
-@@ -164,14 +169,15 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
+@@ -161,14 +169,15 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
  	{
  		BOOL bStartOfPage = FALSE;
  		long nThisX = ( pColFlags[nX] & CR_HIDDEN ) ? 0 : pColWidth[nX];
@@ -381,7 +598,7 @@ index 513464d..36544b5 100644
  		else
  			bStartOfPage = TRUE;
  
-@@ -181,7 +187,7 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
+@@ -178,7 +187,7 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
  			for (SCCOL i=nRepeatStartX; i<=nRepeatEndX; i++)
  				nPageSizeX -= ( pColFlags[i] & CR_HIDDEN ) ? 0 : pColWidth[i];
  			while (nX<=nRepeatEndX)
@@ -390,7 +607,7 @@ index 513464d..36544b5 100644
  			bColFound = TRUE;
  		}
  
-@@ -189,23 +195,21 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
+@@ -186,23 +195,21 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
  	}
  
      // Remove all page breaks in range.
@@ -423,19 +640,21 @@ index 513464d..36544b5 100644
  			nSizeY = 0;
  			bStartOfPage = TRUE;
  		}
-@@ -226,10 +230,5 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
+@@ -222,12 +229,7 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
+ #endif
              nPageSizeY -= nHeights;
              if (nY <= nRepeatEndY)
 -            {
 -                pRowFlags->AndValue( nY, nRepeatEndY, sal::static_int_cast<BYTE>(~CR_PAGEBREAK) );
-+                RemoveRowPageBreaks(nY, nRepeatEndY);
 -                nY = nRepeatEndY + 1;
 -                aFlagsIter.Resync( nY);
 -                aHeightIter.Resync( nY);
 -            }
++                RemoveRowPageBreaks(nY, nRepeatEndY);
  			bRowFound = TRUE;
  		}
-@@ -241,43 +243,205 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
+ 
+@@ -238,46 +240,214 @@ void ScTable::UpdatePageBreaks( const ScRange* pUserArea )
  
  	if (nEndCol < MAXCOL)
  	{
@@ -453,18 +672,28 @@ index 513464d..36544b5 100644
 -            pRowFlags->AndValue( nEndRow+2, MAXROW, sal::static_int_cast<BYTE>(~CR_PAGEBREAK) );
 +            RemoveRowPageBreaks(nEndRow+2, MAXROW);
  	}
-     mbPageBreaksValid = true;
++    mbPageBreaksValid = true;
  }
  
  void ScTable::RemoveManualBreaks()
  {
+-	if (pColFlags)
+-		for (SCCOL nCol = 0; nCol <= MAXCOL; nCol++)
+-			pColFlags[nCol] &= ~CR_MANUALBREAK;
+-
+-	if (pRowFlags)
+-        pRowFlags->AndValue( 0, MAXROW, sal::static_int_cast<BYTE>(~CR_MANUALBREAK) );
 +    maRowManualBreaks.clear();
 +    maColManualBreaks.clear();
-     InvalidatePageBreaks();
-+}
-+
-+BOOL ScTable::HasManualBreaks() const
-+{
++    InvalidatePageBreaks();
+ }
+ 
+ BOOL ScTable::HasManualBreaks() const
+ {
+-	if (pColFlags)
+-		for (SCCOL nCol = 0; nCol <= MAXCOL; nCol++)
+-			if ( pColFlags[nCol] & CR_MANUALBREAK )
+-				return TRUE;
 +    return !maRowManualBreaks.empty() || !maColManualBreaks.empty();
 +}
 +
@@ -479,42 +708,36 @@ index 513464d..36544b5 100644
 +        copy(maRowManualBreaks.begin(), maRowManualBreaks.end(), inserter(rBreaks, rBreaks.begin()));
 +    }
 +}
- 
--	if (pColFlags)
--		for (SCCOL nCol = 0; nCol <= MAXCOL; nCol++)
--			pColFlags[nCol] &= ~CR_MANUALBREAK;
++
 +void ScTable::GetAllColBreaks(set<SCCOL>& rBreaks, bool bPage, bool bManual) const
 +{
 +    if (bPage)
 +        rBreaks = maColPageBreaks;
- 
--	if (pRowFlags)
--        pRowFlags->AndValue( 0, MAXROW, sal::static_int_cast<BYTE>(~CR_MANUALBREAK) );
++
 +    if (bManual)
 +    {
 +        using namespace std;
 +        copy(maColManualBreaks.begin(), maColManualBreaks.end(), inserter(rBreaks, rBreaks.begin()));
 +    }
- }
- 
--BOOL ScTable::HasManualBreaks() const
++}
++
 +bool ScTable::HasRowPageBreak(SCROW nRow) const
- {
--	if (pColFlags)
--		for (SCCOL nCol = 0; nCol <= MAXCOL; nCol++)
--			if ( pColFlags[nCol] & CR_MANUALBREAK )
--				return TRUE;
++{
 +    if (!ValidRow(nRow))
 +        return false;
 +
 +    return maRowPageBreaks.count(nRow) > 0;
 +}
-+
+ 
+-	if (pRowFlags)
+-        if (ValidRow( pRowFlags->GetLastAnyBitAccess( 0, CR_MANUALBREAK)))
+-            return TRUE;
 +bool ScTable::HasColPageBreak(SCCOL nCol) const
 +{
 +    if (!ValidCol(nCol))
 +        return false;
-+
+ 
+-	return FALSE;
 +    return maColPageBreaks.count(nCol) > 0;
 +}
 +
@@ -550,14 +773,10 @@ index 513464d..36544b5 100644
 +{
 +    if (!ValidRow(nRow))
 +        return;
- 
--	if (pRowFlags)
--        if (ValidRow( pRowFlags->GetLastAnyBitAccess( 0, CR_MANUALBREAK)))
--            return TRUE;
++
 +    if (bPage)
 +        maRowPageBreaks.erase(nRow);
- 
--	return FALSE;
++
 +    if (bManual)
 +    {    
 +        maRowManualBreaks.erase(nRow);
@@ -659,6 +878,15 @@ index 513464d..36544b5 100644
  }
  
  void ScTable::SetPageSize( const Size& rSize )
+ {
+ 	if ( rSize.Width() != 0 && rSize.Height() != 0 )
+ 	{
++        if (aPageSizeTwips != rSize)
++            InvalidatePageBreaks();
++
+ 		bPageSizeValid = TRUE;
+ 		aPageSizeTwips = rSize;
+ 	}
 diff --git sc/source/filter/excel/xepage.cxx sc/source/filter/excel/xepage.cxx
 index 52aa775..f99b732 100644
 --- sc/source/filter/excel/xepage.cxx
@@ -854,7 +1082,7 @@ index 2a52521..cb1aba2 100644
  }
  
 diff --git sc/source/filter/xml/xmlexprt.cxx sc/source/filter/xml/xmlexprt.cxx
-index 7916833..42bc5b0 100644
+index 089f12d..4dd19a1 100644
 --- sc/source/filter/xml/xmlexprt.cxx
 +++ sc/source/filter/xml/xmlexprt.cxx
 @@ -1947,6 +1947,7 @@ void ScXMLExport::_ExportAutoStyles()
@@ -865,11 +1093,26 @@ index 7916833..42bc5b0 100644
  								    uno::Reference<table::XTableColumns> xTableColumns(xColumnRowRange->getColumns());
  								    if (xTableColumns.is())
  								    {
+diff --git sc/source/ui/docshell/dbdocfun.cxx sc/source/ui/docshell/dbdocfun.cxx
+index 9e2a647..0e670d8 100644
+--- sc/source/ui/docshell/dbdocfun.cxx
++++ sc/source/ui/docshell/dbdocfun.cxx
+@@ -938,7 +938,10 @@ BOOL ScDBDocFunc::Query( SCTAB nTab, const ScQueryParam& rQueryParam,
+ 	}
+ 
+ 	if (!bCopy)
++    {
++        pDoc->InvalidatePageBreaks(nTab);    
+ 		pDoc->UpdatePageBreaks( nTab );
++    }
+ 
+     // #i23299# because of Subtotal functions, the whole rows must be set dirty
+ 	ScRange aDirtyRange( 0 , aLocalParam.nRow1, nDestTab,
 diff --git sc/source/ui/docshell/docfunc.cxx sc/source/ui/docshell/docfunc.cxx
-index 29b4b23..1477025 100644
+index 0d98486..1477025 100644
 --- sc/source/ui/docshell/docfunc.cxx
 +++ sc/source/ui/docshell/docfunc.cxx
-@@ -3033,20 +3033,20 @@ BOOL ScDocFunc::InsertPageBreak( BOOL bColumn, const ScAddress& rPos,
+@@ -3033,20 +3033,22 @@ BOOL ScDocFunc::InsertPageBreak( BOOL bColumn, const ScAddress& rPos,
  	if (nPos == 0)
  		return FALSE;					// erste Spalte / Zeile
  
@@ -896,10 +1139,12 @@ index 29b4b23..1477025 100644
 +        pDoc->SetColBreak(static_cast<SCCOL>(nPos), nTab, false, true);
 +    else
 +        pDoc->SetRowBreak(static_cast<SCROW>(nPos), nTab, false, true);
- 
-     pDoc->InvalidatePageBreaks(nTab);
++
++    pDoc->InvalidatePageBreaks(nTab);
  	pDoc->UpdatePageBreaks( nTab );
-@@ -3091,22 +3091,25 @@ BOOL ScDocFunc::RemovePageBreak( BOOL bColumn, const ScAddress& rPos,
+ 
+ 	if (bColumn)
+@@ -3089,20 +3091,25 @@ BOOL ScDocFunc::RemovePageBreak( BOOL bColumn, const ScAddress& rPos,
  
      SCCOLROW nPos = bColumn ? static_cast<SCCOLROW>(rPos.Col()) :
          static_cast<SCCOLROW>(rPos.Row());
@@ -930,11 +1175,58 @@ index 29b4b23..1477025 100644
 +        pDoc->RemoveColBreak(static_cast<SCCOL>(nPos), nTab, false, true);
 +    else
 +        pDoc->RemoveRowBreak(static_cast<SCROW>(nPos), nTab, false, true);
- 
--    pDoc->InvalidatePageBreaks(nTab);
++
  	pDoc->UpdatePageBreaks( nTab );
  
  	if (bColumn)
+diff --git sc/source/ui/docshell/olinefun.cxx sc/source/ui/docshell/olinefun.cxx
+index ed5fb52..37023e2 100644
+--- sc/source/ui/docshell/olinefun.cxx
++++ sc/source/ui/docshell/olinefun.cxx
+@@ -692,6 +692,7 @@ BOOL ScOutlineDocFunc::ShowOutline( SCTAB nTab, BOOL bColumns, USHORT nLevel, US
+ 
+ 	pArray->SetVisibleBelow( nLevel, nEntry, TRUE, TRUE );
+ 
++    pDoc->InvalidatePageBreaks(nTab);
+ 	pDoc->UpdatePageBreaks( nTab );
+ 
+ 	if (bPaint)
+@@ -757,6 +758,7 @@ BOOL ScOutlineDocFunc::HideOutline( SCTAB nTab, BOOL bColumns, USHORT nLevel, US
+ 
+ 	pArray->SetVisibleBelow( nLevel, nEntry, FALSE );
+ 
++    pDoc->InvalidatePageBreaks(nTab);
+ 	pDoc->UpdatePageBreaks( nTab );
+ 
+ 	if (bPaint)
+diff --git sc/source/ui/undo/undocell.cxx sc/source/ui/undo/undocell.cxx
+index 52c8bc0..9237578 100644
+--- sc/source/ui/undo/undocell.cxx
++++ sc/source/ui/undo/undocell.cxx
+@@ -587,6 +587,8 @@ void ScUndoPageBreak::DoChange( BOOL bInsertP ) const
+ 			pViewShell->InsertPageBreak(bColumn, FALSE);
+ 		else
+ 			pViewShell->DeletePageBreak(bColumn, FALSE);
++
++        pDocShell->GetDocument()->InvalidatePageBreaks(nTab);
+ 	}
+ }
+ 
+diff --git sc/source/ui/undo/undodat.cxx sc/source/ui/undo/undodat.cxx
+index 36bb424..7420660 100644
+--- sc/source/ui/undo/undodat.cxx
++++ sc/source/ui/undo/undodat.cxx
+@@ -1032,7 +1032,10 @@ void __EXPORT ScUndoQuery::Undo()
+ 		pDoc->SetDBCollection( new ScDBCollection( *pUndoDB ), TRUE );
+ 
+ 	if (!bCopy)
++    {
++        pDoc->InvalidatePageBreaks(nTab);    
+ 		pDoc->UpdatePageBreaks( nTab );
++    }
+ 
+     ScRange aDirtyRange( 0 , aQueryParam.nRow1, nTab,
+         MAXCOL, aQueryParam.nRow2, nTab );
 diff --git sc/source/ui/unoobj/cellsuno.cxx sc/source/ui/unoobj/cellsuno.cxx
 index d4cfb42..53f0d52 100644
 --- sc/source/ui/unoobj/cellsuno.cxx
@@ -1035,10 +1327,10 @@ index d4cfb42..53f0d52 100644
  		else
  			ScCellRangeObj::GetOnePropertyValue(pMap, rAny);
 diff --git sc/source/ui/unoobj/docuno.cxx sc/source/ui/unoobj/docuno.cxx
-index af78648..9fac1bb 100644
+index f14ab4a..f2f1eb5 100644
 --- sc/source/ui/unoobj/docuno.cxx
 +++ sc/source/ui/unoobj/docuno.cxx
-@@ -2670,13 +2670,13 @@ uno::Any SAL_CALL ScTableColumnsObj::getPropertyValue( const rtl::OUString& aPro
+@@ -2685,13 +2685,13 @@ uno::Any SAL_CALL ScTableColumnsObj::getPropertyValue( const rtl::OUString& aPro
  	}
  	else if ( aNameString.EqualsAscii( SC_UNONAME_NEWPAGE ) )
  	{
@@ -1056,7 +1348,7 @@ index af78648..9fac1bb 100644
  	}
  
  	return aAny;
-@@ -2924,13 +2924,13 @@ uno::Any SAL_CALL ScTableRowsObj::getPropertyValue( const rtl::OUString& aProper
+@@ -2939,13 +2939,13 @@ uno::Any SAL_CALL ScTableRowsObj::getPropertyValue( const rtl::OUString& aProper
  	}
  	else if ( aNameString.EqualsAscii( SC_UNONAME_NEWPAGE ) )
  	{
@@ -1075,10 +1367,10 @@ index af78648..9fac1bb 100644
      else if ( aNameString.EqualsAscii( SC_UNONAME_CELLBACK ) || aNameString.EqualsAscii( SC_UNONAME_CELLTRAN ) )
      {
 diff --git sc/source/ui/vba/vbarange.cxx sc/source/ui/vba/vbarange.cxx
-index 7a31267..d7f8beb 100644
+index 634443a..986c376 100644
 --- sc/source/ui/vba/vbarange.cxx
 +++ sc/source/ui/vba/vbarange.cxx
-@@ -3708,16 +3708,16 @@ ScVbaRange::getPageBreak() throw (uno::RuntimeException)
+@@ -3719,16 +3719,16 @@ ScVbaRange::getPageBreak() throw (uno::RuntimeException)
  		{
  	        ScDocument* pDoc =  getDocumentFromRange( mxRange );
  	        
@@ -1308,10 +1600,109 @@ index f320558..1585791 100644
  			}
  #endif
 diff --git sc/source/ui/view/printfun.cxx sc/source/ui/view/printfun.cxx
-index 4a8f0cd..2ddaa99 100644
+index 020821d..2ddaa99 100644
 --- sc/source/ui/view/printfun.cxx
 +++ sc/source/ui/view/printfun.cxx
-@@ -3075,7 +3075,8 @@ void ScPrintFunc::CalcPages()				// berechnet aPageRect und Seiten aus nZoom
+@@ -2874,30 +2874,84 @@ void ScPrintFunc::CalcZoom( USHORT nRangeNo )						// Zoom berechnen
+ 	if (aTableParam.bScalePageNum)
+ 	{
+ 		nZoom = 100;
+-		BOOL bFound = FALSE;
+ 		USHORT nPagesToFit = aTableParam.nScalePageNum;
+-		while (!bFound)
+-		{
+-			CalcPages();
+-			if ( nPagesX * nPagesY <= nPagesToFit || nZoom <= ZOOM_MIN )
+-				bFound = TRUE;
+-			else
+-				--nZoom;
+-		}
++
++        sal_uInt16 nLastFitZoom = 0, nLastNonFitZoom = 0;
++        while (true)
++        {
++            if (nZoom <= ZOOM_MIN)
++                break;
++
++            CalcPages();
++            bool bFitsPage = (nPagesX * nPagesY <= nPagesToFit);
++
++            if (bFitsPage)
++            {
++                if (nZoom == 100)
++                    // If it fits at 100 %, it's good enough for me.
++                    break;
++                
++                nLastFitZoom = nZoom;
++                nZoom = (nLastNonFitZoom + nZoom) / 2;
++
++                if (nLastFitZoom == nZoom)
++                    // It converged.  Use this zoom level.
++                    break;
++            }
++            else
++            {
++                if (nZoom - nLastFitZoom <= 1)
++                {
++                    nZoom = nLastFitZoom;
++                    CalcPages();
++                    break;
++                }
++
++                nLastNonFitZoom = nZoom;
++                nZoom = (nLastFitZoom + nZoom) / 2;
++            }
++        }
+ 	}
+     else if (aTableParam.bScaleTo)
+     {
+         nZoom = 100;
+-        BOOL bFound = FALSE;
+         USHORT nW = aTableParam.nScaleWidth;
+         USHORT nH = aTableParam.nScaleHeight;
+-        while (!bFound)
++
++        sal_uInt16 nLastFitZoom = 0, nLastNonFitZoom = 0;
++        while (true)
+         {
++            if (nZoom <= ZOOM_MIN)
++                break;
++
+             CalcPages();
+-            if ( ((!nW || (nPagesX <= nW)) && (!nH || (nPagesY <= nH))) || (nZoom <= ZOOM_MIN) )
+-                bFound = TRUE;
++            bool bFitsPage = ((!nW || (nPagesX <= nW)) && (!nH || (nPagesY <= nH)));
++
++            if (bFitsPage)
++            {
++                if (nZoom == 100)
++                    // If it fits at 100 %, it's good enough for me.
++                    break;
++                
++                nLastFitZoom = nZoom;
++                nZoom = (nLastNonFitZoom + nZoom) / 2;
++
++                if (nLastFitZoom == nZoom)
++                    // It converged.  Use this zoom level.
++                    break;
++            }
+             else
+-                --nZoom;
++            {
++                if (nZoom - nLastFitZoom <= 1)
++                {
++                    nZoom = nLastFitZoom;
++                    CalcPages();
++                    break;
++                }
++
++                nLastNonFitZoom = nZoom;
++                nZoom = (nLastFitZoom + nZoom) / 2;
++            }
+         }
+     }
+ 	else if (aTableParam.bScaleAll)
+@@ -3021,7 +3075,8 @@ void ScPrintFunc::CalcPages()				// berechnet aPageRect und Seiten aus nZoom
  	for (SCCOL i=nStartCol; i<=nEndCol; i++)
  	{
  		BYTE nFlags = pDoc->GetColFlags(i,nPrintTab);
@@ -1321,7 +1712,7 @@ index 4a8f0cd..2ddaa99 100644
  		{
  			pPageEndX[nPagesX] = i-1;
  			++nPagesX;
-@@ -3100,7 +3101,8 @@ void ScPrintFunc::CalcPages()				// berechnet aPageRect und Seiten aus nZoom
+@@ -3046,7 +3101,8 @@ void ScPrintFunc::CalcPages()				// berechnet aPageRect und Seiten aus nZoom
          SCROW nRangeEnd = aIter.GetRangeEnd();
          for (SCROW j=aIter.GetRangeStart(); j<=nRangeEnd; ++j)
          {
