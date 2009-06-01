@@ -1,0 +1,1112 @@
+diff --git sc/inc/mdds/flatsegmenttree.hxx sc/inc/mdds/flatsegmenttree.hxx
+new file mode 100644
+index 0000000..59d1e0c
+--- /dev/null
++++ sc/inc/mdds/flatsegmenttree.hxx
+@@ -0,0 +1,509 @@
++/*************************************************************************
++ *
++ * Copyright (c) 2008-2009 Kohei Yoshida
++ * 
++ * Permission is hereby granted, free of charge, to any person
++ * obtaining a copy of this software and associated documentation
++ * files (the "Software"), to deal in the Software without
++ * restriction, including without limitation the rights to use,
++ * copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following
++ * conditions:
++ * 
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ * 
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
++ * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ *
++ ************************************************************************/
++
++#ifndef __MDDS_FLATSEGMENTTREE_HXX__
++#define __MDDS_FLATSEGMENTTREE_HXX__
++
++#include <iostream>
++#include <cassert>
++
++#include "node.hxx"
++
++namespace mdds {
++
++template<typename _Key, typename _Value>
++class flat_segment_tree
++{
++public:
++    typedef _Key    key_type;
++    typedef _Value  value_type;
++
++    struct nonleaf_value_type
++    {
++        key_type low;   /// low range value (inclusive)
++        key_type high;  /// high range value (non-inclusive)
++    };
++
++    struct leaf_value_type
++    {
++        key_type    key;
++        value_type  value;
++    };
++
++    struct node : public node_base
++    {
++        union {
++            nonleaf_value_type  value_nonleaf;
++            leaf_value_type     value_leaf;
++        };
++
++        node(bool _is_leaf) :
++            node_base(_is_leaf)
++        {
++        }
++
++        virtual ~node()
++        {
++        }
++
++        virtual void fill_nonleaf_value(const node_base_ptr& left_node, const node_base_ptr& right_node)
++        {
++            // Parent node should carry the range of all of its child nodes.
++            if (left_node)
++                value_nonleaf.low  = left_node->is_leaf ? get_node(left_node)->value_leaf.key : get_node(left_node)->value_nonleaf.low;
++            else
++                // Having a left node is prerequisite.
++                return;
++
++            if (right_node)
++            {    
++                if (right_node->is_leaf)
++                {
++                    // When the child nodes are leaf nodes, the upper bound
++                    // must be the value of the node that comes after the
++                    // right leaf node (if such node exists).
++
++                    if (right_node->right)
++                        value_nonleaf.high = get_node(right_node->right)->value_leaf.key;
++                    else
++                        value_nonleaf.high = get_node(right_node)->value_leaf.key;
++                }
++                else
++                {
++                    value_nonleaf.high = get_node(right_node)->value_nonleaf.high;
++                }
++            }
++            else
++                value_nonleaf.high = left_node->is_leaf ? get_node(left_node)->value_leaf.key : get_node(left_node)->value_nonleaf.high;
++        }
++
++        virtual void dump_value() const
++        {
++            using ::std::cout;
++            if (is_leaf)
++            {
++                cout << "(" << value_leaf.key << ")";
++            }
++            else
++            {
++                cout << "(" << value_nonleaf.low << "-" << value_nonleaf.high << ")";
++            }
++            cout << " ";
++        }
++
++        virtual node_base* create_new(bool leaf) const
++        {
++            return new node(leaf);
++        }
++    };
++
++    /** 
++     * Get a pointer of concrete node type from the base pointer.
++     *
++     * @param base_node base node pointer (ref-counted)
++     * 
++     * @return raw pointer of concrete node type
++     */
++    static node* get_node(const node_base_ptr& base_node)
++    {
++        return static_cast<node*>(base_node.get());
++    }
++
++    flat_segment_tree(key_type min_val, key_type max_val, value_type init_val) :
++        m_root_node(static_cast<node*>(NULL)),
++        m_left_leaf(new node(true)),
++        m_right_leaf(new node(true)),
++        m_valid_tree(false)
++    {
++        // we need to create two end nodes during initialization.
++        get_node(m_left_leaf)->value_leaf.key = min_val;
++        get_node(m_left_leaf)->value_leaf.value = init_val;
++        m_left_leaf->right = m_right_leaf;
++
++        get_node(m_right_leaf)->value_leaf.key = max_val;
++        m_right_leaf->left = m_left_leaf;
++    }
++
++    ~flat_segment_tree()
++    {
++        // Go through all leaf nodes, and disconnect their links.
++        node_base* cur_node = m_left_leaf.get();
++        do
++        {
++            node_base* next_node = cur_node->right.get();
++            disconnect_node(cur_node);
++            cur_node = next_node;
++        }
++        while (cur_node != m_right_leaf.get());
++
++        disconnect_node(m_right_leaf.get());
++        clear_tree(m_root_node);
++        disconnect_node(m_root_node.get());
++    }
++
++    /** 
++     * Insert a new segment into the tree.
++     *
++     * @param start start value of the segment being inserted.  The value is 
++     *              inclusive.
++     * @param end end value of the segment being inserted.  The value is not 
++     *            inclusive.
++     * @param val value associated with this segment.
++     */
++    void insert_segment(key_type start, key_type end, value_type val)
++    {
++        if (end < get_node(m_left_leaf)->value_leaf.key || start > get_node(m_right_leaf)->value_leaf.key)
++            // The new segment does not overlap the current interval.
++            return;
++
++        if (start < get_node(m_left_leaf)->value_leaf.key)
++            // The start value should not be smaller than the current minimum.
++            start = get_node(m_left_leaf)->value_leaf.key;
++
++        if (end > get_node(m_right_leaf)->value_leaf.key)
++            // The end value should not be larger than the current maximum.
++            end = get_node(m_right_leaf)->value_leaf.key;
++
++        if (start >= end)
++            return;
++
++        // Find the node with value that either equals or is greater than the
++        // start value.
++
++        node_base_ptr start_pos = get_insertion_pos_leaf(start, m_left_leaf);
++        if (!start_pos)
++            // Insertion position not found.  Bail out.
++            return;
++
++        node_base_ptr end_pos = get_insertion_pos_leaf(end, start_pos);
++        if (!end_pos)
++            end_pos = m_right_leaf;
++
++        node_base_ptr new_start_node;
++        value_type old_value;
++
++        // Set the start node.
++
++        if (get_node(start_pos)->value_leaf.key == start)
++        {
++            // Re-use the existing node, but save the old value for later.
++
++            if (start_pos->left && get_node(start_pos->left)->value_leaf.value == val)
++            {
++                // Extend the existing segment.
++                old_value = get_node(start_pos)->value_leaf.value;
++                new_start_node = start_pos->left;
++            }
++            else
++            {
++                // Update the value of the existing node.
++                old_value = get_node(start_pos)->value_leaf.value;
++                get_node(start_pos)->value_leaf.value = val;
++                new_start_node = start_pos;
++            }
++        }
++        else if (get_node(start_pos->left)->value_leaf.value == val)
++        {
++            // Extend the existing segment.
++            old_value = get_node(start_pos->left)->value_leaf.value;
++            new_start_node = start_pos->left;
++        }
++        else
++        {
++            // Insert a new node before the insertion position node.
++            node_base_ptr new_node(new node(true));
++            get_node(new_node)->value_leaf.key = start;
++            get_node(new_node)->value_leaf.value = val;
++            new_start_node = new_node;
++
++            node_base_ptr left_node = start_pos->left;
++            old_value = get_node(left_node)->value_leaf.value;
++
++            // Link to the left node.
++            link_nodes(left_node, new_node);
++
++            // Link to the right node.
++            link_nodes(new_node, start_pos);
++        }
++
++        node_base_ptr cur_node = new_start_node->right;
++        while (cur_node != end_pos)
++        {
++            // Disconnect the link between the current node and the previous node.
++            cur_node->left->right.reset();
++            cur_node->left.reset();
++            old_value = get_node(cur_node)->value_leaf.value;
++
++            cur_node = cur_node->right;
++        }
++
++        // Set the end node.
++
++        if (get_node(end_pos)->value_leaf.key == end)
++        {
++            // The new segment ends exactly at the end node position.
++
++            if (end_pos->right && get_node(end_pos)->value_leaf.value == val)
++            {
++                // Remove this node, and connect the new start node with the 
++                // node that comes after this node.
++                new_start_node->right = end_pos->right;
++                if (end_pos->right)
++                    end_pos->right->left = new_start_node;
++                disconnect_node(end_pos.get());
++            }
++            else
++            {
++                // Just link the new segment to this node.
++                new_start_node->right = end_pos;
++                end_pos->left = new_start_node;
++            }
++        }
++        else if (old_value == val)
++        {
++            link_nodes(new_start_node, end_pos);
++        }
++        else
++        {
++            // Insert a new node before the insertion position node.
++            node_base_ptr new_node(new node(true));
++            get_node(new_node)->value_leaf.key = end;
++            get_node(new_node)->value_leaf.value = old_value;
++
++            // Link to the left node.
++            link_nodes(new_start_node, new_node);
++
++            // Link to the right node.
++            link_nodes(new_node, end_pos);
++        }
++
++        m_valid_tree = false;
++    }
++
++    bool search(key_type key, value_type& value, key_type* start = NULL, key_type* end = NULL) const
++    {
++        if (key < get_node(m_left_leaf)->value_leaf.key || get_node(m_right_leaf)->value_leaf.key <= key)
++            // key value is out-of-bound.
++            return false;
++
++        const node* pos = get_insertion_pos_leaf(key, get_node(m_left_leaf));
++        if (pos->value_leaf.key == key)
++        {
++            value = pos->value_leaf.value;
++            if (start)
++                *start = pos->value_leaf.key;
++            if (end && pos->right)
++                *end = get_node(pos->right)->value_leaf.key;
++            return true;
++        }
++        else if (pos->left && get_node(pos->left)->value_leaf.key < key)
++        {
++            value = get_node(pos->left)->value_leaf.value;
++            if (start)
++                *start = get_node(pos->left)->value_leaf.key;
++            if (end)
++                *end = pos->value_leaf.key;
++            return true;
++        }
++
++        return false;
++    }
++
++    bool search_tree(key_type key, value_type& value, key_type* start = NULL, key_type* end = NULL) const
++    {
++        if (!m_root_node || !m_valid_tree)
++        {    
++            // either tree has not been built, or is in an invalid state.
++            return false;
++        }
++
++        if (key < get_node(m_left_leaf)->value_leaf.key || get_node(m_right_leaf)->value_leaf.key <= key)
++        {    
++            // key value is out-of-bound.
++            return false;
++        }
++
++        // Descend down the tree through the last non-leaf layer.
++
++        node* cur_node = get_node(m_root_node);
++        while (true)
++        {
++            if (cur_node->left)
++            {
++                if (cur_node->left->is_leaf)
++                    break;
++
++                const nonleaf_value_type& v = get_node(cur_node->left)->value_nonleaf;
++                if (v.low <= key && key < v.high)
++                {    
++                    cur_node = get_node(cur_node->left);
++                    continue;
++                }
++            }
++            else
++            {    
++                // left child node can't be missing !
++                return false;
++            }
++
++            if (cur_node->right)
++            {
++                const nonleaf_value_type& v = get_node(cur_node->right)->value_nonleaf;
++                if (v.low <= key && key < v.high)
++                {    
++                    cur_node = get_node(cur_node->right);
++                    continue;
++                }
++            }
++            return false;
++        }
++
++        assert(cur_node->left->is_leaf && cur_node->right->is_leaf);
++
++        key_type key1 = get_node(cur_node->left)->value_leaf.key;
++        key_type key2 = get_node(cur_node->right)->value_leaf.key;
++
++        if (key1 <= key && key < key2)
++        {
++            cur_node = get_node(cur_node->left);
++        }
++        else if (key2 <= key && key < cur_node->value_nonleaf.high)
++        {
++            cur_node = get_node(cur_node->right);
++        }
++        else
++            cur_node = NULL;
++
++        if (!cur_node)
++        {    
++            return false;
++        }
++
++        value = cur_node->value_leaf.value;
++        if (start)
++            *start = cur_node->value_leaf.key;
++
++        if (end)
++        {
++            assert(cur_node->right);
++            if (cur_node->right)
++                *end = get_node(cur_node->right)->value_leaf.key;
++            else
++                // This should never happen, but just in case....
++                *end = get_node(m_right_leaf)->value_leaf.key;
++        }
++
++        return true;
++    }
++
++    void build_tree()
++    {
++        if (!m_left_leaf)
++            return;
++
++        clear_tree(m_root_node);
++        m_root_node = ::mdds::build_tree(m_left_leaf);
++        m_valid_tree = true;
++    }
++
++    bool is_tree_valid() const
++    {
++        return m_valid_tree;
++    }
++
++    void dump_tree() const
++    {
++        using ::std::cout;
++        using ::std::endl;
++
++        ::mdds::dump_tree(m_root_node);
++
++        cout << endl << "  node instance count = " << node_base::get_instance_count() << endl;
++    }
++
++    void dump_leaf_nodes() const
++    {
++        using ::std::cout;
++        using ::std::endl;
++
++        cout << "------------------------------------------" << endl;
++
++        node_base_ptr cur_node = m_left_leaf;
++        long node_id = 0;
++        while (cur_node)
++        {
++            cout << "  node " << node_id++ << ": key = " << get_node(cur_node)->value_leaf.key
++                << "; value = " << get_node(cur_node)->value_leaf.value 
++                << endl;
++            cur_node = cur_node->right;
++        }
++        cout << endl << "  node instance count = " << node_base::get_instance_count() << endl;
++    }
++
++private:
++    flat_segment_tree();
++
++    node_base_ptr get_insertion_pos_leaf(key_type key, const node_base_ptr& start_pos) const
++    {
++        node_base_ptr cur_node = start_pos;
++        while (cur_node)
++        {
++            if (key <= get_node(cur_node)->value_leaf.key)
++            {
++                // Found the insertion position.
++                return cur_node;
++            }
++            cur_node = cur_node->right;
++        }
++        return node_base_ptr();
++    }
++
++    const node* get_insertion_pos_leaf(key_type key, const node* start_pos) const
++    {
++        const node* cur_node = start_pos;
++        while (cur_node)
++        {
++            if (key <= cur_node->value_leaf.key)
++            {
++                // Found the insertion position.
++                return cur_node;
++            }
++            cur_node = get_node(cur_node->right);
++        }
++        return NULL;
++    }
++
++private:
++    node_base_ptr   m_root_node;
++    node_base_ptr   m_left_leaf;
++    node_base_ptr   m_right_leaf;
++    bool            m_valid_tree;
++};
++
++}
++
++#endif
+diff --git sc/inc/mdds/node.hxx sc/inc/mdds/node.hxx
+new file mode 100644
+index 0000000..8975c86
+--- /dev/null
++++ sc/inc/mdds/node.hxx
+@@ -0,0 +1,301 @@
++/*************************************************************************
++ *
++ * Copyright (c) 2008-2009 Kohei Yoshida
++ * 
++ * Permission is hereby granted, free of charge, to any person
++ * obtaining a copy of this software and associated documentation
++ * files (the "Software"), to deal in the Software without
++ * restriction, including without limitation the rights to use,
++ * copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following
++ * conditions:
++ * 
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ * 
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
++ * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ *
++ ************************************************************************/
++
++#ifndef __MDDS_NODE_HXX__
++#define __MDDS_NODE_HXX__
++
++#include <iostream>
++#include <list>
++#include <cassert>
++
++//#define DEBUG_NODE_BASE 1
++
++#define USE_INTRUSIVE_PTR 0
++
++#if USE_INTRUSIVE_PTR
++#include <boost/intrusive_ptr.hpp>
++#else
++#include <boost/shared_ptr.hpp>
++#endif
++
++namespace mdds {
++
++struct intrusive_ref_base
++{
++#if USE_INTRUSIVE_PTR
++    size_t _refcount;
++
++    intrusive_ref_base() :
++        _refcount(0) {}
++#endif
++    virtual ~intrusive_ref_base() {}
++};
++
++#if USE_INTRUSIVE_PTR
++inline void intrusive_ptr_add_ref(intrusive_ref_base* p)
++{
++    ++p->_refcount;
++}
++
++inline void intrusive_ptr_release(intrusive_ref_base* p)
++{
++    --p->_refcount;
++    if (!p->_refcount)
++        delete p;
++}
++#endif
++
++#ifdef DEBUG_NODE_BASE
++size_t node_instance_count = 0;
++#endif
++
++struct node_base;
++#if USE_INTRUSIVE_PTR
++typedef ::boost::intrusive_ptr<node_base> node_base_ptr;
++#else
++typedef ::boost::shared_ptr<node_base> node_base_ptr;
++#endif
++
++struct node_base : public intrusive_ref_base
++{
++    static size_t get_instance_count()
++    {
++#ifdef DEBUG_NODE_BASE
++        return node_instance_count;
++#else
++        return 0;
++#endif
++    }
++    node_base_ptr   parent; /// parent node
++    node_base_ptr   left;   /// left child node or previous sibling if it's a leaf node.
++    node_base_ptr   right;  /// right child node or next sibling if it's aleaf node.
++    bool            is_leaf;
++
++    node_base(bool _is_leaf) : 
++        intrusive_ref_base(),
++        parent(static_cast<node_base*>(NULL)),
++        left(static_cast<node_base*>(NULL)),
++        right(static_cast<node_base*>(NULL)),
++        is_leaf(_is_leaf)
++    {
++#ifdef DEBUG_NODE_BASE
++        ++node_instance_count;
++#endif
++    }
++
++    virtual ~node_base()
++    {
++#ifdef DEBUG_NODE_BASE
++        --node_instance_count;
++#endif
++    }
++
++    // These methods are specific to concrete class implementation.
++
++    virtual void fill_nonleaf_value(const node_base_ptr& left_node, const node_base_ptr& right_node) = 0;
++    virtual void dump_value() const = 0;
++    virtual node_base* create_new(bool leaf) const = 0;
++};
++
++template<typename _NodePtr>
++void disconnect_node(_NodePtr p)
++{
++    if (!p)
++        return;
++
++    p->left.reset();
++    p->right.reset();
++    p->parent.reset();
++}
++
++template<typename _NodePtr>
++void link_nodes(_NodePtr& left, _NodePtr& right)
++{
++    left->right = right;
++    right->left = left;
++}
++
++/** 
++ * Disconnect all non-leaf nodes so that their ref-counted instances will 
++ * all get destroyed afterwards. 
++ */
++template<typename _NodePtr>
++void clear_tree(const _NodePtr& node)
++{
++    if (!node)
++        // Nothing to do.
++        return;
++
++    if (node->is_leaf)
++    {
++        node->parent.reset();    
++        return;
++    }
++
++    clear_tree(node->left);
++    clear_tree(node->right);
++    disconnect_node(node.get());
++}
++
++template<typename _NodePtr>
++_NodePtr make_parent_node(const _NodePtr& node1, const _NodePtr& node2)
++{
++    _NodePtr parent_node(node1->create_new(false));
++    node1->parent = parent_node;
++    parent_node->left = node1;
++    if (node2)
++    {
++        node2->parent = parent_node;
++        parent_node->right = node2;
++    }
++
++    parent_node->fill_nonleaf_value(node1, node2);
++    return parent_node;
++}
++
++template<typename _NodePtr>
++_NodePtr build_tree(const _NodePtr& left_leaf_node)
++{
++    if (!left_leaf_node)
++        // The left leaf node is empty.  Nothing to build.
++        return _NodePtr();
++
++    _NodePtr node1, node2;
++    node1 = left_leaf_node;
++
++    ::std::list<_NodePtr> node_list;
++    while (true)
++    {
++        node2 = node1->right;
++        _NodePtr parent_node = make_parent_node(node1, node2);
++        node_list.push_back(parent_node);
++        
++        if (!node2 || !node2->right)
++            // no more nodes.  Break out of the loop.
++            break;
++
++        node1 = node2->right;
++    }
++
++    return build_tree_non_leaf(node_list);
++}
++
++template<typename _NodePtr>
++_NodePtr build_tree_non_leaf(const ::std::list<_NodePtr>& node_list)
++{
++    size_t node_count = node_list.size();
++    if (node_count == 1)
++    {
++        return node_list.front();
++    }
++    else if (node_count == 0)
++        return _NodePtr();
++
++    ::std::list<_NodePtr> new_node_list;
++    _NodePtr node_pair[2];
++    typename ::std::list<_NodePtr>::const_iterator itr    = node_list.begin();
++    typename ::std::list<_NodePtr>::const_iterator itrEnd = node_list.end();
++    for (bool even_itr = false; itr != itrEnd; ++itr, even_itr = !even_itr)
++    {
++        node_pair[even_itr] = *itr;
++        if (even_itr)
++        {
++            _NodePtr parent_node = make_parent_node(node_pair[0], node_pair[1]);
++            node_pair[0].reset();
++            node_pair[1].reset();
++            new_node_list.push_back(parent_node);
++        }
++    }
++
++    if (node_pair[0])
++    {
++        // Un-paired node still needs a parent...
++        _NodePtr parent_node = make_parent_node(node_pair[0], _NodePtr());
++        node_pair[0].reset();
++        node_pair[1].reset();
++        new_node_list.push_back(parent_node);
++    }
++
++    // Move up one level, and do the same procedure until the root node is reached.
++    return build_tree_non_leaf(new_node_list);
++}
++
++template<typename _NodePtr>
++void dump_tree_layer(const ::std::list<_NodePtr>& node_list, unsigned int level)
++{
++    using ::std::cout;
++    using ::std::endl;
++
++    if (node_list.empty())
++        return;
++
++    bool isLeaf = node_list.front()->is_leaf;
++    cout << "level " << level << " (" << (isLeaf?"leaf":"non-leaf") << ")" << endl;
++
++    ::std::list<_NodePtr> newList;
++    typename ::std::list<_NodePtr>::const_iterator itr = node_list.begin(), itrEnd = node_list.end();
++    for (; itr != itrEnd; ++itr)
++    {
++        const _NodePtr& p = *itr;
++        if (!p)
++        {
++            cout << "(x) ";
++            continue;
++        }
++
++        p->dump_value();
++
++        if (p->is_leaf)
++            continue;
++
++        if (p->left)
++        {
++            newList.push_back(p->left);
++            if (p->right)
++                newList.push_back(p->right);
++        }
++    }
++    cout << endl;
++
++    if (!newList.empty())
++        dump_tree_layer(newList, level+1);
++}
++
++template<typename _NodePtr>
++void dump_tree(const _NodePtr& root_node)
++{
++    if (!root_node)
++        return;
++
++    ::std::list<_NodePtr> node_list;
++    node_list.push_back(root_node);
++    dump_tree_layer(node_list, 0);
++}
++
++}
++
++#endif
+diff --git sc/inc/segmenttree.hxx sc/inc/segmenttree.hxx
+new file mode 100644
+index 0000000..f414002
+--- /dev/null
++++ sc/inc/segmenttree.hxx
+@@ -0,0 +1,85 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: compressedarray.hxx,v $
++ * $Revision: 1.7.32.2 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#ifndef SC_SEGMENTTREE_HXX
++#define SC_SEGMENTTREE_HXX
++
++#include "address.hxx"
++
++#include <memory>
++
++class ScFlatBoolSegmentsImpl;
++
++class ScFlatBoolRowSegments
++{
++public:
++    struct RangeData
++    {
++        SCROW   mnRow1;
++        SCROW   mnRow2;
++        bool    mbValue;
++    };
++    ScFlatBoolRowSegments();
++    ~ScFlatBoolRowSegments();
++
++    void setTrue(SCROW nRow1, SCROW nRow2);
++    void setFalse(SCROW nRow1, SCROW nRow2);
++    bool getValue(SCROW nRow);
++    bool getRangeData(SCROW nRow, RangeData& rData);
++
++private:
++    ::std::auto_ptr<ScFlatBoolSegmentsImpl> mpImpl;
++};
++
++// ============================================================================
++
++class ScFlatBoolColSegments
++{
++public:
++    struct RangeData
++    {
++        SCCOL   mnCol1;
++        SCCOL   mnCol2;
++        bool    mbValue;
++    };
++    ScFlatBoolColSegments();
++    ~ScFlatBoolColSegments();
++
++    void setTrue(SCCOL nCol1, SCCOL nCol2);
++    void setFalse(SCCOL nCol1, SCCOL nCol2);
++    bool getValue(SCCOL nCol);
++    bool getRangeData(SCCOL nCol, RangeData& rData);
++
++private:
++    ::std::auto_ptr<ScFlatBoolSegmentsImpl> mpImpl;
++};
++
++
++#endif
+diff --git sc/source/core/data/segmenttree.cxx sc/source/core/data/segmenttree.cxx
+new file mode 100644
+index 0000000..b534de1
+--- /dev/null
++++ sc/source/core/data/segmenttree.cxx
+@@ -0,0 +1,193 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: compressedarray.hxx,v $
++ * $Revision: 1.7.32.2 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++// MARKER(update_precomp.py): autogen include statement, do not remove
++#include "precompiled_sc.hxx"
++
++#include "segmenttree.hxx"
++#include "mdds/flatsegmenttree.hxx"
++
++#define USE_TREE_SEARCH 1
++
++class ScFlatBoolSegmentsImpl
++{
++public:
++    struct RangeData
++    {
++        SCCOLROW    mnPos1;
++        SCCOLROW    mnPos2;
++        bool        mbValue;
++    };
++    ScFlatBoolSegmentsImpl(SCCOLROW nMax);
++    ~ScFlatBoolSegmentsImpl();
++
++    void setTrue(SCCOLROW nPos1, SCCOLROW nPos2);
++    void setFalse(SCCOLROW nPos1, SCCOLROW nPos2);
++    bool getValue(SCCOLROW nPos);
++    bool getRangeData(SCCOLROW nPos, RangeData& rData);
++
++private:
++    ScFlatBoolSegmentsImpl();
++    ScFlatBoolSegmentsImpl(const ScFlatBoolSegmentsImpl&);
++
++    ::mdds::flat_segment_tree<SCCOLROW, bool> maSegments;
++};
++
++ScFlatBoolSegmentsImpl::ScFlatBoolSegmentsImpl(SCCOLROW nMax) :
++    maSegments(0, nMax+1, false)
++{
++}
++
++ScFlatBoolSegmentsImpl::~ScFlatBoolSegmentsImpl()
++{
++}
++
++void ScFlatBoolSegmentsImpl::setTrue(SCCOLROW nPos1, SCCOLROW nPos2)
++{
++    maSegments.insert_segment(nPos1, nPos2+1, true);
++}
++
++void ScFlatBoolSegmentsImpl::setFalse(SCCOLROW nPos1, SCCOLROW nPos2)
++{
++    maSegments.insert_segment(nPos1, nPos2+1, false);
++}
++
++bool ScFlatBoolSegmentsImpl::getValue(SCCOLROW nPos)
++{
++    bool bValue = false;
++#if USE_TREE_SEARCH
++    if (!maSegments.is_tree_valid())
++        maSegments.build_tree();
++
++    maSegments.search_tree(nPos, bValue);
++#else
++    maSegments.search(nPos, bValue);
++#endif
++    return bValue;
++}
++
++bool ScFlatBoolSegmentsImpl::getRangeData(SCCOLROW nPos, RangeData& rData)
++{
++#if USE_TREE_SEARCH
++    if (!maSegments.is_tree_valid())
++        maSegments.build_tree();
++#endif
++
++    bool bValue;
++    SCCOLROW nPos1, nPos2;
++#if USE_TREE_SEARCH
++    if (!maSegments.search_tree(nPos, bValue, &nPos1, &nPos2))
++        return false;
++#else
++    if (!maSegments.search(nPos, bValue, &nPos1, &nPos2))
++        return false;
++#endif
++
++    rData.mnPos1 = nPos1;
++    rData.mnPos2 = nPos2-1; // end point is not inclusive.
++    rData.mbValue = bValue;
++    return true;
++}
++
++// ============================================================================
++
++ScFlatBoolRowSegments::ScFlatBoolRowSegments() :
++    mpImpl(new ScFlatBoolSegmentsImpl(static_cast<SCCOLROW>(MAXROW)))
++{
++}
++
++ScFlatBoolRowSegments::~ScFlatBoolRowSegments()
++{
++}
++
++void ScFlatBoolRowSegments::setTrue(SCROW nRow1, SCROW nRow2)
++{
++    mpImpl->setTrue(static_cast<SCCOLROW>(nRow1), static_cast<SCCOLROW>(nRow2));
++}
++
++void ScFlatBoolRowSegments::setFalse(SCROW nRow1, SCROW nRow2)
++{
++    mpImpl->setFalse(static_cast<SCCOLROW>(nRow1), static_cast<SCCOLROW>(nRow2));
++}
++
++bool ScFlatBoolRowSegments::getValue(SCROW nRow)
++{
++    return mpImpl->getValue(static_cast<SCCOLROW>(nRow));
++}
++
++bool ScFlatBoolRowSegments::getRangeData(SCROW nRow, RangeData& rData)
++{
++    ScFlatBoolSegmentsImpl::RangeData aData;
++    if (!mpImpl->getRangeData(static_cast<SCCOLROW>(nRow), aData))
++        return false;
++
++    rData.mbValue = aData.mbValue;
++    rData.mnRow1  = static_cast<SCROW>(aData.mnPos1);
++    rData.mnRow2  = static_cast<SCROW>(aData.mnPos2);
++    return true;
++}
++
++// ============================================================================
++
++ScFlatBoolColSegments::ScFlatBoolColSegments() :
++    mpImpl(new ScFlatBoolSegmentsImpl(static_cast<SCCOLROW>(MAXCOL)))
++{
++}
++
++ScFlatBoolColSegments::~ScFlatBoolColSegments()
++{
++}
++
++void ScFlatBoolColSegments::setTrue(SCCOL nCol1, SCCOL nCol2)
++{
++    mpImpl->setTrue(static_cast<SCCOLROW>(nCol1), static_cast<SCCOLROW>(nCol2));
++}
++
++void ScFlatBoolColSegments::setFalse(SCCOL nCol1, SCCOL nCol2)
++{
++    mpImpl->setFalse(static_cast<SCCOLROW>(nCol1), static_cast<SCCOLROW>(nCol2));
++}
++
++bool ScFlatBoolColSegments::getValue(SCCOL nCol)
++{
++    return mpImpl->getValue(static_cast<SCCOLROW>(nCol));
++}
++
++bool ScFlatBoolColSegments::getRangeData(SCCOL nCol, RangeData& rData)
++{
++    ScFlatBoolSegmentsImpl::RangeData aData;
++    if (!mpImpl->getRangeData(static_cast<SCCOLROW>(nCol), aData))
++        return false;
++
++    rData.mbValue = aData.mbValue;
++    rData.mnCol1  = static_cast<SCCOL>(aData.mnPos1);
++    rData.mnCol2  = static_cast<SCCOL>(aData.mnPos2);
++    return true;
++}
