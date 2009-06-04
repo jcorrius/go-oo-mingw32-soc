@@ -1,0 +1,171 @@
+diff -rup oox-orig-4/inc/oox/export/drawingml.hxx oox/inc/oox/export/drawingml.hxx
+--- oox-orig-4/inc/oox/export/drawingml.hxx	2009-06-04 11:55:03.000000000 +0200
++++ oox/inc/oox/export/drawingml.hxx	2009-06-04 12:36:30.000000000 +0200
+@@ -20,6 +20,9 @@ namespace beans {
+ namespace drawing {
+     class XShape;
+ }
++namespace style {
++    struct LineSpacing;
++}
+ namespace text {
+     class XTextContent;
+     class XTextRange;
+@@ -76,6 +79,7 @@ public:
+     void WriteBlipFill( ::com::sun::star::uno::Reference< ::com::sun::star::beans::XPropertySet > rXPropSet, String sURLPropName );
+     void WriteOutline( ::com::sun::star::uno::Reference< ::com::sun::star::beans::XPropertySet > rXPropSet );
+     void WriteStretch();
++    void WriteLinespacing( ::com::sun::star::style::LineSpacing& rLineSpacing );
+ 
+     ::rtl::OUString WriteBlip( ::rtl::OUString& rURL );
+     void WriteBlipMode( ::com::sun::star::uno::Reference< ::com::sun::star::beans::XPropertySet > rXPropSet );
+diff -rup oox-orig-4/source/export/drawingml.cxx oox/source/export/drawingml.cxx
+--- oox-orig-4/source/export/drawingml.cxx	2009-06-04 11:55:07.000000000 +0200
++++ oox/source/export/drawingml.cxx	2009-06-04 16:11:34.000000000 +0200
+@@ -42,6 +42,8 @@
+ #include <com/sun/star/awt/Gradient.hpp>
+ #include <com/sun/star/beans/XPropertySet.hpp>
+ #include <com/sun/star/beans/XPropertyState.hpp>
++#include <com/sun/star/beans/Property.hpp>
++#include <com/sun/star/beans/XPropertySetInfo.hpp>
+ #include <com/sun/star/container/XEnumerationAccess.hpp>
+ #include <com/sun/star/drawing/BitmapMode.hpp>
+ #include <com/sun/star/drawing/EnhancedCustomShapeAdjustmentValue.hpp>
+@@ -52,6 +54,8 @@
+ #include <com/sun/star/drawing/TextVerticalAdjust.hpp>
+ #include <com/sun/star/i18n/ScriptType.hpp>
+ #include <com/sun/star/io/XOutputStream.hpp>
++#include <com/sun/star/style/LineSpacing.hpp>
++#include <com/sun/star/style/LineSpacingMode.hpp>
+ #include <com/sun/star/style/ParagraphAdjust.hpp>
+ #include <com/sun/star/text/WritingMode.hpp>
+ #include <com/sun/star/text/XText.hpp>
+@@ -71,10 +75,12 @@
+ #include <svx/svxenum.hxx>
+ 
+ using namespace ::com::sun::star;
+-using namespace ::com::sun::star::uno;
++using namespace ::com::sun::star::beans;
+ using namespace ::com::sun::star::drawing;
+-using namespace ::com::sun::star::text;
+ using namespace ::com::sun::star::i18n;
++using namespace ::com::sun::star::style;
++using namespace ::com::sun::star::text;
++using namespace ::com::sun::star::uno;
+ using ::com::sun::star::beans::PropertyState;
+ using ::com::sun::star::beans::PropertyValue;
+ using ::com::sun::star::beans::XPropertySet;
+@@ -83,6 +89,7 @@ using ::com::sun::star::container::XEnum
+ using ::com::sun::star::container::XEnumerationAccess;
+ using ::com::sun::star::container::XIndexAccess;
+ using ::com::sun::star::io::XOutputStream;
++using ::com::sun::star::style::LineSpacing;
+ using ::com::sun::star::text::XText;
+ using ::com::sun::star::text::XTextContent;
+ using ::com::sun::star::text::XTextField;
+@@ -107,6 +114,44 @@ namespace drawingml {
+ #define GET(variable, propName) \
+     if ( GETA(propName) ) \
+         mAny >>= variable;
++DBG(
++void lcl_dump_pset(Reference< XPropertySet > rXPropSet)
++{
++    Reference< XPropertySetInfo > info = rXPropSet->getPropertySetInfo ();
++    Sequence< beans::Property > props = info->getProperties ();
++
++    for (int i=0; i < props.getLength (); i++) {
++        OString name = OUStringToOString( props [i].Name, RTL_TEXTENCODING_UTF8);
++        fprintf (stderr,"%30s = ", name.getStr() );
++
++	try {
++        Any value = rXPropSet->getPropertyValue( props [i].Name );
++
++        OUString strValue;
++        sal_Int32 intValue;
++        bool boolValue;
++	LineSpacing spacing;
++//         RectanglePoint pointValue;
++
++        if( value >>= strValue )
++            fprintf (stderr,"\"%s\"\n", USS( strValue ) );
++        else if( value >>= intValue )
++            fprintf (stderr,"%d            (hex: %x)\n", intValue, intValue);
++        else if( value >>= boolValue )
++            fprintf (stderr,"%d            (bool)\n", boolValue);
++	else if( value >>= spacing ) {
++	    fprintf (stderr, "mode: %d value: %d\n", spacing.Mode, spacing.Height);
++	}
++//         else if( value >>= pointValue )
++//             fprintf (stderr,"%d            (RectanglePoint)\n", pointValue);
++        else
++            fprintf (stderr,"???           <unhandled type>\n");
++	} catch(Exception e) {
++	    fprintf (stderr,"unable to get '%s' value\n", USS(props [i].Name));
++	}
++    }
++}
++);
+ 
+ // not thread safe
+ int DrawingML::mnImageCounter = 1;
+@@ -1084,14 +1129,30 @@ const char* DrawingML::GetAlignment( sal
+     return sAlignment;
+ }
+ 
++void DrawingML::WriteLinespacing( LineSpacing& rSpacing )
++{
++    if( rSpacing.Mode == LineSpacingMode::PROP )
++        mpFS->singleElementNS( XML_a, XML_spcPct,
++			       XML_val, I32S( ((sal_Int32)rSpacing.Height)*1000 ),
++			       FSEND );
++    else
++        mpFS->singleElementNS( XML_a, XML_spcPts,
++			       XML_val, I32S( rSpacing.Height ),
++			       FSEND );
++}
++
+ void DrawingML::WriteParagraphProperties( Reference< XTextContent > rParagraph )
+ {
+     Reference< XPropertySet > rXPropSet( rParagraph, UNO_QUERY );
+     Reference< XPropertyState > rXPropState( rParagraph, UNO_QUERY );
++    PropertyState eState;
+ 
+     if( !rXPropSet.is() || !rXPropState.is() )
+         return;
+ 
++    //OSL_TRACE("write paragraph properties pset");
++    //DBG(lcl_dump_pset(rXPropSet));
++
+     sal_Int16 nLevel = -1;
+     GET( nLevel, NumberingLevel );
+ 
+@@ -1102,15 +1163,27 @@ void DrawingML::WriteParagraphProperties
+     sal_Int16 nAlignment( style::ParagraphAdjust_LEFT );
+     GET( nAlignment, ParaAdjust );
+ 
++    sal_Bool bHasLinespacing = sal_False;
++    LineSpacing aLineSpacing;
++    if( GETAD( ParaLineSpacing ) )
++	bHasLinespacing = ( mAny >>= aLineSpacing );
++
+     if( nLevel != -1
+-            || nLeftMargin > 0
+-            || nAlignment != style::ParagraphAdjust_LEFT ) {
++	|| nLeftMargin > 0
++	|| nAlignment != style::ParagraphAdjust_LEFT
++	|| bHasLinespacing ) {
+         mpFS->startElementNS( XML_a, XML_pPr,
+                               XML_lvl, nLevel > 0 ? I32S( nLevel ) : NULL,
+                               XML_marL, nLeftMargin > 0 ? IS( nLeftMargin ) : NULL,
+                               XML_algn, GetAlignment( nAlignment ),
+                               FSEND );
+ 
++	if( bHasLinespacing ) {
++	    mpFS->startElementNS( XML_a, XML_lnSpc, FSEND );
++	    WriteLinespacing( aLineSpacing );
++	    mpFS->endElementNS( XML_a, XML_lnSpc );
++	}
++
+         WriteParagraphNumbering( rXPropSet, nLevel );
+ 
+         mpFS->endElementNS( XML_a, XML_pPr );
