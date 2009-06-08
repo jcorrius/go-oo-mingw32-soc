@@ -1,0 +1,997 @@
+diff --git sc/source/core/tool/stringutil.cxx sc/source/core/tool/stringutil.cxx
+index eaf756e..ae6247f 100644
+--- sc/source/core/tool/stringutil.cxx
++++ sc/source/core/tool/stringutil.cxx
+@@ -35,6 +35,7 @@
+ 
+ #include "stringutil.hxx"
+ #include "rtl/ustrbuf.hxx"
++#include "rtl/math.hxx"
+ 
+ using ::rtl::OUString;
+ using ::rtl::OUStringBuffer;
+@@ -42,17 +43,28 @@ using ::rtl::OUStringBuffer;
+ bool ScStringUtil::parseSimpleNumber(
+     const OUString& rStr, sal_Unicode dsep, sal_Unicode gsep, double& rVal)
+ {
++    if (gsep == 0x00A0)
++        // unicode space to ascii space
++        gsep = 0x0020;
++
+     OUStringBuffer aBuf;
+     sal_Int32 n = rStr.getLength();
+     const sal_Unicode* p = rStr.getStr();
+     sal_Int32 nPosDSep = -1, nPosGSep = -1;
++    sal_uInt32 nDigitCount = 0;
++
+     for (sal_Int32 i = 0; i < n; ++i)
+     {
+         sal_Unicode c = p[i];
++        if (c == 0x00A0)
++            // unicode space to ascii space
++            c = 0x0020;
++
+         if (sal_Unicode('0') <= c && c <= sal_Unicode('9'))
+         {
+             // this is a digit.
+             aBuf.append(c);
++            ++nDigitCount;
+         }
+         else if (c == dsep)
+         {
+@@ -61,28 +73,35 @@ bool ScStringUtil::parseSimpleNumber(
+             if (nPosDSep >= 0)
+                 // a second decimal separator -> not a valid number.
+                 return false;
++
+             if (nPosGSep >= 0 && i - nPosGSep != 4)
+                 // the number has a group separator and the decimal sep is not
+                 // positioned correctly.
+                 return false;
+ 
+             nPosDSep = i;
++            nPosGSep = -1;
+             aBuf.append(c);
++            nDigitCount = 0;
+         }
+         else if (c == gsep)
+         {
+             // this is a group (thousand) separator.
++
+             if (i == 0)
++                // not allowed as the first character.
+                 return false;
+ 
+-            if (nPosGSep >= 0 && i - nPosGSep != 4)
+-            {    
+-                // this group separator is not positioned correctly relative
+-                // to the last group separator.
++            if (nPosDSep >= 0)
++                // not allowed after the decimal separator.
++                return false;
++
++            if (nPosGSep >= 0 && nDigitCount != 3)
++                // must be exactly 3 digits since the last group separator.
+                 return false;
+-            }
+ 
+             nPosGSep = i;
++            nDigitCount = 0;
+         }
+         else if (c == sal_Unicode('-') || c == sal_Unicode('+'))
+         {
+@@ -96,6 +115,17 @@ bool ScStringUtil::parseSimpleNumber(
+             return false;
+     }
+ 
+-    rVal = aBuf.makeStringAndClear().toDouble();
++    // finished parsing the number.
++
++    if (nPosGSep >= 0 && nDigitCount != 3)
++        // must be exactly 3 digits since the last group separator.
++        return false;
++
++    rtl_math_ConversionStatus eStatus = rtl_math_ConversionStatus_Ok;
++    sal_Int32 nParseEnd = 0;
++    rVal = ::rtl::math::stringToDouble(aBuf.makeStringAndClear(), dsep, gsep, &eStatus, &nParseEnd);
++    if (eStatus != rtl_math_ConversionStatus_Ok)
++        return false;
++
+     return true;
+ }
+diff --git sc/source/ui/dbgui/asciiopt.cxx sc/source/ui/dbgui/asciiopt.cxx
+index 1e439d6..6b26dee 100644
+--- sc/source/ui/dbgui/asciiopt.cxx
++++ sc/source/ui/dbgui/asciiopt.cxx
+@@ -57,8 +57,10 @@ ScAsciiOptions::ScAsciiOptions() :
+     aFieldSeps		( ';' ),
+     bMergeFieldSeps	( FALSE ),
+     bQuotedFieldAsText(false),
++    bDetectSpecialNumber(false),
+     cTextSep		( cDefaultTextSep ),
+     eCharSet		( gsl_getSystemTextEncoding() ),
++    eLang           ( LANGUAGE_SYSTEM ),
+     bCharSetSystem	( FALSE ),
+     nStartRow		( 1 ),
+     nInfoCount		( 0 ),
+@@ -73,8 +75,10 @@ ScAsciiOptions::ScAsciiOptions(const ScAsciiOptions& rOpt) :
+     aFieldSeps		( rOpt.aFieldSeps ),
+     bMergeFieldSeps	( rOpt.bMergeFieldSeps ),
+     bQuotedFieldAsText(rOpt.bQuotedFieldAsText),
++    bDetectSpecialNumber(rOpt.bDetectSpecialNumber),
+     cTextSep		( rOpt.cTextSep ),
+     eCharSet		( rOpt.eCharSet ),
++    eLang           ( rOpt.eLang ),
+     bCharSetSystem	( rOpt.bCharSetSystem ),
+     nStartRow		( rOpt.nStartRow ),
+     nInfoCount		( rOpt.nInfoCount )
+@@ -252,13 +256,20 @@ void ScAsciiOptions::ReadFromString( const String& rString )
+         eCharSet = ScGlobal::GetCharsetValue( aToken );
+     }
+ 
++    // Language
++    if (nCount >= 4)
++    {    
++        aToken = rString.GetToken(3, ',');
++        eLang = static_cast<LanguageType>(aToken.ToInt32());
++    }
++
+         //
+         //	Startzeile
+         //
+ 
+-    if ( nCount >= 4 )
++    if ( nCount >= 5 )
+     {
+-        aToken = rString.GetToken(3,',');
++        aToken = rString.GetToken(4,',');
+         nStartRow = aToken.ToInt32();
+     }
+ 
+@@ -266,12 +277,12 @@ void ScAsciiOptions::ReadFromString( const String& rString )
+         //	Spalten-Infos
+         //
+ 
+-    if ( nCount >= 5 )
++    if ( nCount >= 6 )
+     {
+         delete[] pColStart;
+         delete[] pColFormat;
+ 
+-        aToken = rString.GetToken(4,',');
++        aToken = rString.GetToken(5,',');
+         nSub = aToken.GetTokenCount('/');
+         nInfoCount = nSub / 2;
+         if (nInfoCount)
+@@ -292,11 +303,18 @@ void ScAsciiOptions::ReadFromString( const String& rString )
+     }
+ 
+     // Import quoted field as text.
+-    if (nCount >= 6)
++    if (nCount >= 7)
+     {
+-        aToken = rString.GetToken(5, ',');
++        aToken = rString.GetToken(6, ',');
+         bQuotedFieldAsText = aToken.EqualsAscii("true") ? true : false;
+     }
++
++    // Detect special nubmers.
++    if (nCount >= 8)
++    {
++        aToken = rString.GetToken(7, ',');
++        bDetectSpecialNumber = aToken.EqualsAscii("true") ? true : false;
++    }
+ }
+ 
+ 
+@@ -347,6 +365,10 @@ String ScAsciiOptions::WriteToString() const
+         aOutStr += ScGlobal::GetCharsetString( eCharSet );
+     aOutStr += ',';					// Token-Ende
+ 
++    // Language
++    aOutStr += String::CreateFromInt32(eLang);
++    aOutStr += ',';
++
+         //
+         //	Startzeile
+         //
+@@ -372,6 +394,10 @@ String ScAsciiOptions::WriteToString() const
+ 
+     // Import quoted field as text.
+     aOutStr += String::CreateFromAscii(bQuotedFieldAsText ? "true" : "false");
++    aOutStr += ',';
++
++    // Detect special nubmers.
++    aOutStr += String::CreateFromAscii(bDetectSpecialNumber ? "true" : "false");
+ 
+     return aOutStr;
+ }
+diff --git sc/source/ui/dbgui/asciiopt.hrc sc/source/ui/dbgui/asciiopt.hrc
+index 60c8500..6fde4ee 100644
+--- sc/source/ui/dbgui/asciiopt.hrc
++++ sc/source/ui/dbgui/asciiopt.hrc
+@@ -29,32 +29,46 @@
+  ************************************************************************/
+ #include "sc.hrc"
+ //#define RID_SCDLG_ASCII 256
+-#define RB_SEPARATED 1
+-#define RB_FIXED 2
+-#define FT_CHARSET 3
+-#define LB_CHARSET 4
+-#define FL_SEPOPT 5
+-#define FT_FIELDSEP 6
+-#define CB_FIELDSEP 7
+-#define FT_TEXTSEP 8
+-#define CB_TEXTSEP 9
+-#define FL_FIELDOPT 10
+-#define FT_TYPE 12
+-#define FT_PREVIEW 13
+-#define LB_TYPE1 23
+-#define FL_WIDTH 30
+-#define BTN_OK 31
+-#define BTN_CANCEL 32
+-#define BTN_HELP 33
+-#define CTR_TABLEBOX 41
+-#define CKB_TAB 51
+-#define CKB_SPACE 52
+-#define CKB_SEMICOLON 53
+-#define CKB_COMMA 54
+-#define CKB_OTHER 55
+-#define ED_OTHER 56
+-#define FT_AT_ROW 59
+-#define NF_AT_ROW 60
+-#define CB_ASONCE 90
+-#define CB_QUOTED_AS_TEXT 91
+-#define STR_TEXTTOCOLUMNS 100
++#define BTN_OK                      1 
++#define BTN_CANCEL                  2 
++#define BTN_HELP                    3 
++
++#define FL_FIELDOPT                 4 
++#define FT_CHARSET                  5 
++#define LB_CHARSET                  6 
++#define FT_CUSTOMLANG               7 
++#define LB_CUSTOMLANG               8 
++#define FT_AT_ROW                   9 
++#define NF_AT_ROW                   10
++
++#define FL_SEPOPT                   11
++#define RB_FIXED                    12
++#define RB_SEPARATED                13
++#define CKB_TAB                     14
++#define CKB_COMMA                   15
++#define CKB_OTHER                   16
++#define ED_OTHER                    17
++#define CKB_SEMICOLON               18
++#define CKB_SPACE                   19
++#define CB_ASONCE                   20
++#define CB_TEXTSEP                  21
++#define FT_TEXTSEP                  22
++
++#define FL_OTHER_OPTIONS            23
++#define CB_QUOTED_AS_TEXT           24
++#define CB_DETECT_SPECIAL_NUMBER    25
++
++#define FL_WIDTH                    26
++#define FT_TYPE                     27
++#define LB_TYPE1                    28
++#define CTR_TABLEBOX                29
++#define STR_TEXTTOCOLUMNS           30
++                                    
++                                    
++                                    
++                                    
++                                    
++                                    
++                                    
++                                    
++                                    
+diff --git sc/source/ui/dbgui/asciiopt.src sc/source/ui/dbgui/asciiopt.src
+index 5e9ba11..d08eedf 100644
+--- sc/source/ui/dbgui/asciiopt.src
++++ sc/source/ui/dbgui/asciiopt.src
+@@ -34,55 +34,44 @@ ModalDialog RID_SCDLG_ASCII
+ {
+     OutputSize = TRUE ;
+     SVLook = TRUE ;
+-    Size = MAP_APPFONT ( 320 , 264 ) ;
++    Size = MAP_APPFONT ( 320 , 305 ) ;
+     Text [ en-US ] = "Text Import" ;
+     Moveable = TRUE ;
+-    FixedLine FL_WIDTH
+-    {
+-        Pos = MAP_APPFONT ( 6 , 147 ) ;
+-        Size = MAP_APPFONT ( 252 , 8 ) ;
+-        Text [ en-US ] = "Fields" ;
+-    };
+-    FixedText FT_TYPE
+-    {
+-        Pos = MAP_APPFONT ( 12 , 160 ) ;
+-        Size = MAP_APPFONT ( 60 , 8 ) ;
+-        Text [ en-US ] = "Column t~ype";
+-    };
+-    ListBox LB_TYPE1
++
++    OKButton BTN_OK
+     {
+-        Pos = MAP_APPFONT ( 76 , 158 ) ;
+-        Size = MAP_APPFONT ( 60 , 68 ) ;
++        Pos = MAP_APPFONT ( 264 , 6 ) ;
++        Size = MAP_APPFONT ( 50 , 14 ) ;
+         TabStop = TRUE ;
+-        DropDown = TRUE ;
++        DefButton = TRUE ;
+     };
+-    FixedLine FL_SEPOPT
++    CancelButton BTN_CANCEL
+     {
+-        Pos = MAP_APPFONT ( 6 , 48 ) ;
+-        Size = MAP_APPFONT ( 252 , 8 ) ;
+-        Text [ en-US ] = "Separator options" ;
++        Pos = MAP_APPFONT ( 264 , 23 ) ;
++        Size = MAP_APPFONT ( 50 , 14 ) ;
++        TabStop = TRUE ;
+     };
+-    RadioButton RB_FIXED
++    HelpButton BTN_HELP
+     {
+-        Pos = MAP_APPFONT ( 12 , 59 ) ;
+-        Size = MAP_APPFONT ( 243 , 10 ) ;
+-        Text [ en-US ] = "~Fixed width" ;
++        Pos = MAP_APPFONT ( 264 , 43 ) ;
++        Size = MAP_APPFONT ( 50 , 14 ) ;
+         TabStop = TRUE ;
+     };
+-    RadioButton RB_SEPARATED
++
++    FixedLine FL_FIELDOPT
+     {
+-        Pos = MAP_APPFONT ( 12 , 73 ) ;
+-        Size = MAP_APPFONT ( 243 , 10 ) ;
+-        Text [ en-US ] = "~Separated by" ;
+-        TabStop = TRUE ;
+-        Check = TRUE ;
++        Pos = MAP_APPFONT ( 6 , 3 ) ;
++        Size = MAP_APPFONT ( 252 , 8 ) ;
++        Text [ en-US ] = "Import" ;
+     };
++
+     FixedText FT_CHARSET
+     {
+         Pos = MAP_APPFONT ( 12 , 16 ) ;
+         Size = MAP_APPFONT ( 60 , 8 ) ;
+         Text [ en-US ] = "Ch~aracter set" ;
+     };
++
+     ListBox LB_CHARSET
+     {
+         Pos = MAP_APPFONT ( 76 , 14 ) ;
+@@ -91,75 +80,81 @@ ModalDialog RID_SCDLG_ASCII
+         DropDown = TRUE ;
+         Sort = TRUE;
+     };
+-    FixedLine FL_FIELDOPT
+-    {
+-        Pos = MAP_APPFONT ( 6 , 3 ) ;
+-        Size = MAP_APPFONT ( 252 , 8 ) ;
+-        Text [ en-US ] = "Import" ;
+-    };
+-    FixedText FT_TEXTSEP
++
++    FixedText FT_CUSTOMLANG
+     {
+-        Pos = MAP_APPFONT ( 156 , 114 ) ;
++        Pos = MAP_APPFONT ( 12 , 32 ) ;
+         Size = MAP_APPFONT ( 60 , 8 ) ;
+-        Text [ en-US ] = "Te~xt delimiter" ;
++        Text [ en-US ] = "Language" ;
+     };
+-    ComboBox CB_TEXTSEP
++
++    ListBox LB_CUSTOMLANG
+     {
+-        Pos = MAP_APPFONT ( 218 , 112 ) ;
+-        Size = MAP_APPFONT ( 37 , 94 ) ;
++        Pos = MAP_APPFONT ( 76 , 30 ) ;
++        Size = MAP_APPFONT ( 130 , 61 ) ;
+         TabStop = TRUE ;
+         DropDown = TRUE ;
++        Sort = TRUE;
+     };
+-    OKButton BTN_OK
++
++    FixedText FT_AT_ROW
+     {
+-        Pos = MAP_APPFONT ( 264 , 6 ) ;
+-        Size = MAP_APPFONT ( 50 , 14 ) ;
+-        TabStop = TRUE ;
+-        DefButton = TRUE ;
++        Pos = MAP_APPFONT ( 12 , 48 ) ;
++        Size = MAP_APPFONT ( 60 , 8 ) ;
++        Text [ en-US ] = "From ro~w" ;
+     };
+-    CancelButton BTN_CANCEL
++
++    NumericField NF_AT_ROW
+     {
+-        Pos = MAP_APPFONT ( 264 , 23 ) ;
+-        Size = MAP_APPFONT ( 50 , 14 ) ;
++        Border = TRUE ;
++        SVLook = TRUE ;
++        Pos = MAP_APPFONT ( 76 , 46 ) ;
++        Size = MAP_APPFONT ( 30 , 12 ) ;
+         TabStop = TRUE ;
++        Spin = TRUE ;
++        Repeat = TRUE ;
++        Minimum = 1 ;
+     };
+-    HelpButton BTN_HELP
++
++    FixedLine FL_SEPOPT
+     {
+-        Pos = MAP_APPFONT ( 264 , 43 ) ;
+-        Size = MAP_APPFONT ( 50 , 14 ) ;
+-        TabStop = TRUE ;
++        Pos = MAP_APPFONT ( 6 , 63 ) ;
++        Size = MAP_APPFONT ( 252 , 8 ) ;
++        Text [ en-US ] = "Separator options" ;
+     };
+-    CheckBox CKB_TAB
++    RadioButton RB_FIXED
+     {
+-        Pos = MAP_APPFONT ( 20 , 86 ) ;
+-        Size = MAP_APPFONT ( 68 , 10 ) ;
++        Pos = MAP_APPFONT ( 12 , 75 ) ;
++        Size = MAP_APPFONT ( 243 , 10 ) ;
++        Text [ en-US ] = "~Fixed width" ;
+         TabStop = TRUE ;
+-        Text [ en-US ] = "~Tab" ;
+     };
+-    CheckBox CKB_SEMICOLON
++    RadioButton RB_SEPARATED
+     {
+-        Pos = MAP_APPFONT ( 20 , 99 ) ;
+-        Size = MAP_APPFONT ( 68 , 10 ) ;
++        Pos = MAP_APPFONT ( 12 , 89 ) ;
++        Size = MAP_APPFONT ( 243 , 10 ) ;
++        Text [ en-US ] = "~Separated by" ;
+         TabStop = TRUE ;
+-        Text [ en-US ] = "S~emicolon" ;
++        Check = TRUE ;
+     };
+-    CheckBox CKB_COMMA
++
++    CheckBox CKB_TAB
+     {
+-        Pos = MAP_APPFONT ( 92 , 86 ) ;
++        Pos = MAP_APPFONT ( 20 , 102 ) ;
+         Size = MAP_APPFONT ( 68 , 10 ) ;
+         TabStop = TRUE ;
+-        Text [ en-US ] = "~Comma" ;
++        Text [ en-US ] = "~Tab" ;
+     };
+-    CheckBox CKB_SPACE
++    CheckBox CKB_COMMA
+     {
+-        Pos = MAP_APPFONT ( 92 , 99 ) ;
++        Pos = MAP_APPFONT ( 92 , 102 ) ;
+         Size = MAP_APPFONT ( 68 , 10 ) ;
+         TabStop = TRUE ;
+-        Text [ en-US ] = "S~pace" ;
++        Text [ en-US ] = "~Comma" ;
+     };
+     CheckBox CKB_OTHER
+     {
+-        Pos = MAP_APPFONT ( 164 , 86 ) ;
++        Pos = MAP_APPFONT ( 164 , 102 ) ;
+         Size = MAP_APPFONT ( 50 , 10 ) ;
+         TabStop = TRUE ;
+         Text [ en-US ] = "~Other" ;
+@@ -167,50 +162,100 @@ ModalDialog RID_SCDLG_ASCII
+     Edit ED_OTHER
+     {
+         Border = TRUE ;
+-        Pos = MAP_APPFONT ( 218 , 84 ) ;
++        Pos = MAP_APPFONT ( 218 , 100 ) ;
+         Size = MAP_APPFONT ( 37 , 12 ) ;
+         TabStop = TRUE ;
+         MaxTextLength = 10 ;
+     };
+-    FixedText FT_AT_ROW
+-    {
+-        Pos = MAP_APPFONT ( 12 , 32 ) ;
+-        Size = MAP_APPFONT ( 60 , 8 ) ;
+-        Text [ en-US ] = "From ro~w" ;
+-    };
+-    NumericField NF_AT_ROW
++
++    CheckBox CKB_SEMICOLON
+     {
+-        Border = TRUE ;
+-        SVLook = TRUE ;
+-        Pos = MAP_APPFONT ( 76 , 30 ) ;
+-        Size = MAP_APPFONT ( 30 , 12 ) ;
++        Pos = MAP_APPFONT ( 20 , 115 ) ;
++        Size = MAP_APPFONT ( 68 , 10 ) ;
+         TabStop = TRUE ;
+-        Spin = TRUE ;
+-        Repeat = TRUE ;
+-        Minimum = 1 ;
++        Text [ en-US ] = "S~emicolon" ;
+     };
+-    Control CTR_TABLEBOX
++    CheckBox CKB_SPACE
+     {
+-        HelpId = HID_SC_ASCII_TABCTR ;
+-        Border = TRUE ;
+-        DialogControl = TRUE ;
+-        Pos = MAP_APPFONT ( 12 , 176 ) ;
+-        Size = MAP_APPFONT ( 243 , 82 ) ;
++        Pos = MAP_APPFONT ( 92 , 115 ) ;
++        Size = MAP_APPFONT ( 68 , 10 ) ;
++        TabStop = TRUE ;
++        Text [ en-US ] = "S~pace" ;
+     };
++
+     CheckBox CB_ASONCE
+     {
+-        Pos = MAP_APPFONT ( 20 , 114 ) ;
++        Pos = MAP_APPFONT ( 20 , 130 ) ;
+         Size = MAP_APPFONT ( 130 , 10 ) ;
+         TabStop = TRUE ;
+         Text [ en-US ] = "Merge ~delimiters" ;
+     };
++
++    ComboBox CB_TEXTSEP
++    {
++        Pos = MAP_APPFONT ( 218 , 128 ) ;
++        Size = MAP_APPFONT ( 37 , 94 ) ;
++        TabStop = TRUE ;
++        DropDown = TRUE ;
++    };
++    FixedText FT_TEXTSEP
++    {
++        Pos = MAP_APPFONT ( 156 , 130 ) ;
++        Size = MAP_APPFONT ( 60 , 8 ) ;
++        Text [ en-US ] = "Te~xt delimiter" ;
++    };
++
++    FixedLine FL_OTHER_OPTIONS
++    {
++        Pos = MAP_APPFONT ( 6 , 146 ) ;
++        Size = MAP_APPFONT ( 252 , 8 ) ;
++        Text [ en-US ] = "Other options" ;
++    };
++
+     CheckBox CB_QUOTED_AS_TEXT
+     {
+-        Pos = MAP_APPFONT ( 20 , 129 ) ;
++        Pos = MAP_APPFONT ( 20 , 158 ) ;
+         Size = MAP_APPFONT ( 130 , 10 ) ;
+         TabStop = TRUE ;
+         Text [ en-US ] = "~Quoted field as text" ;
+     };
++
++    CheckBox CB_DETECT_SPECIAL_NUMBER
++    {
++        Pos = MAP_APPFONT ( 20 , 171 ) ;
++        Size = MAP_APPFONT ( 130 , 10 ) ;
++        TabStop = TRUE ;
++        Text [ en-US ] = "Detect special numbers" ;
++    };
++
++    FixedLine FL_WIDTH
++    {
++        Pos = MAP_APPFONT ( 6 , 187 ) ;
++        Size = MAP_APPFONT ( 252 , 8 ) ;
++        Text [ en-US ] = "Fields" ;
++    };
++    FixedText FT_TYPE
++    {
++        Pos = MAP_APPFONT ( 12 , 200 ) ;
++        Size = MAP_APPFONT ( 60 , 8 ) ;
++        Text [ en-US ] = "Column t~ype";
++    };
++    ListBox LB_TYPE1
++    {
++        Pos = MAP_APPFONT ( 76 , 198 ) ;
++        Size = MAP_APPFONT ( 60 , 68 ) ;
++        TabStop = TRUE ;
++        DropDown = TRUE ;
++    };
++    Control CTR_TABLEBOX
++    {
++        HelpId = HID_SC_ASCII_TABCTR ;
++        Border = TRUE ;
++        DialogControl = TRUE ;
++        Pos = MAP_APPFONT ( 12 , 216 ) ;
++        Size = MAP_APPFONT ( 243 , 82 ) ;
++    };
++
+     String STR_TEXTTOCOLUMNS
+     {
+         Text [ en-US ] = "Text to Columns" ;
+diff --git sc/source/ui/dbgui/scuiasciiopt.cxx sc/source/ui/dbgui/scuiasciiopt.cxx
+index 83f051d..15d34c8 100644
+--- sc/source/ui/dbgui/scuiasciiopt.cxx
++++ sc/source/ui/dbgui/scuiasciiopt.cxx
+@@ -119,8 +119,8 @@ sal_Unicode lcl_CharFromCombo( ComboBox& rCombo, const String& rList )
+ }
+ 
+ static void load_Separators( OUString &sFieldSeparators, OUString &sTextSeparators, 
+-                             bool &bMergeDelimiters, bool& bQuotedAsText, bool &bFixedWidth, 
+-                             sal_Int32 &nFromRow, sal_Int32 &nCharSet )
++                             bool &bMergeDelimiters, bool& bQuotedAsText, bool& bDetectSpecialNum, 
++                             bool &bFixedWidth, sal_Int32 &nFromRow, sal_Int32 &nCharSet )
+ {
+     Sequence<Any>aValues;
+     const Any *pProperties;
+@@ -159,8 +159,9 @@ static void load_Separators( OUString &sFieldSeparators, OUString &sTextSeparato
+         pProperties[6] >>= bQuotedAsText;
+ }
+ 
+-static void save_Separators( String maSeparators, String maTxtSep, bool bMergeDelimiters, bool bQuotedAsText,
+-                             bool bFixedWidth, sal_Int32 nFromRow, sal_Int32 nCharSet )
++static void save_Separators( 
++    String maSeparators, String maTxtSep, bool bMergeDelimiters, bool bQuotedAsText,
++    bool bDetectSpecialNum, bool bFixedWidth, sal_Int32 nFromRow, sal_Int32 nCharSet )
+ {
+     OUString sFieldSeparators = OUString( maSeparators );
+     OUString sTextSeparators = OUString( maTxtSep );
+@@ -204,6 +205,8 @@ ScImportAsciiDlg::ScImportAsciiDlg( Window* pParent,String aDatName,
+         aFlFieldOpt ( this, ScResId( FL_FIELDOPT ) ),
+         aFtCharSet	( this, ScResId( FT_CHARSET ) ),
+         aLbCharSet	( this, ScResId( LB_CHARSET ) ),
++        aFtCustomLang( this, ScResId( FT_CUSTOMLANG ) ),
++        aLbCustomLang( this, ScResId( LB_CUSTOMLANG ) ), 
+ 
+         aFtRow		( this, ScResId( FT_AT_ROW	) ),
+         aNfRow		( this,	ScResId( NF_AT_ROW	) ),
+@@ -219,7 +222,10 @@ ScImportAsciiDlg::ScImportAsciiDlg( Window* pParent,String aDatName,
+         aCkbOther	( this, ScResId( CKB_OTHER ) ),
+         aEdOther	( this, ScResId( ED_OTHER ) ),
+         aCkbAsOnce	( this, ScResId( CB_ASONCE) ),
++        aFlOtherOpt ( this, ScResId( FL_OTHER_OPTIONS ) ), 
++
+         aCkbQuotedAsText( this, ScResId(CB_QUOTED_AS_TEXT) ),
++        aCkbDetectNumber( this, ScResId(CB_DETECT_SPECIAL_NUMBER) ),
+         aFtTextSep	( this, ScResId( FT_TEXTSEP ) ),
+         aCbTextSep	( this, ScResId( CB_TEXTSEP ) ),
+ 
+@@ -260,12 +266,13 @@ ScImportAsciiDlg::ScImportAsciiDlg( Window* pParent,String aDatName,
+     bool bMergeDelimiters = false;
+     bool bFixedWidth = false;
+     bool bQuotedFieldAsText = true;
++    bool bDetectSpecialNum = false;
+     sal_Int32 nFromRow = 1;
+     sal_Int32 nCharSet = -1;
+     if (mbFileImport)
+         // load separators only when importing csv files.
+         load_Separators (sFieldSeparators, sTextSeparators, bMergeDelimiters, 
+-                         bQuotedFieldAsText, bFixedWidth, nFromRow, nCharSet);
++                         bQuotedFieldAsText, bDetectSpecialNum, bFixedWidth, nFromRow, nCharSet);
+     maFieldSeparators = String(sFieldSeparators);
+ 
+     if( bMergeDelimiters )
+@@ -344,6 +351,7 @@ ScImportAsciiDlg::ScImportAsciiDlg( Window* pParent,String aDatName,
+     aCkbComma.SetClickHdl( aSeparatorHdl );
+     aCkbAsOnce.SetClickHdl( aSeparatorHdl );
+     aCkbQuotedAsText.SetClickHdl( aSeparatorHdl );
++    aCkbDetectNumber.SetClickHdl( aSeparatorHdl );
+     aCkbSpace.SetClickHdl( aSeparatorHdl );
+     aCkbOther.SetClickHdl( aSeparatorHdl );
+     aEdOther.SetModifyHdl( aSeparatorHdl );
+@@ -363,6 +371,11 @@ ScImportAsciiDlg::ScImportAsciiDlg( Window* pParent,String aDatName,
+     SetSelectedCharSet();
+     aLbCharSet.SetSelectHdl( LINK( this, ScImportAsciiDlg, CharSetHdl ) );
+ 
++    aLbCustomLang.SetLanguageList(
++        LANG_LIST_ALL | LANG_LIST_ONLY_KNOWN, false, false);
++    aLbCustomLang.InsertLanguage(LANGUAGE_SYSTEM);
++    aLbCustomLang.SelectLanguage(LANGUAGE_SYSTEM, true);
++
+     // *** column type ListBox ***
+     xub_StrLen nCount = aColumnUser.GetTokenCount();
+     for (xub_StrLen i=0; i<nCount; i++)
+@@ -393,8 +406,8 @@ ScImportAsciiDlg::~ScImportAsciiDlg()
+ {
+     if (mbFileImport)
+         save_Separators( maFieldSeparators, aCbTextSep.GetText(), aCkbAsOnce.IsChecked(), 
+-                         aCkbQuotedAsText.IsChecked(), aRbFixed.IsChecked(), 
+-                         aNfRow.GetValue(), aLbCharSet.GetSelectEntryPos());
++                         aCkbQuotedAsText.IsChecked(), aCkbDetectNumber.IsChecked(), 
++                         aRbFixed.IsChecked(), aNfRow.GetValue(), aLbCharSet.GetSelectEntryPos());
+     delete[] mpRowPosArray;
+ }
+ 
+@@ -473,6 +486,7 @@ void ScImportAsciiDlg::GetOptions( ScAsciiOptions& rOpt )
+ {
+     rOpt.SetCharSet( meCharSet );
+     rOpt.SetCharSetSystem( mbCharSetSystem );
++    rOpt.SetLanguage(aLbCustomLang.GetSelectLanguage());
+     rOpt.SetFixedLen( aRbFixed.IsChecked() );
+     rOpt.SetStartRow( (long)aNfRow.GetValue() );
+     maTableBox.FillColumnData( rOpt );
+@@ -480,9 +494,11 @@ void ScImportAsciiDlg::GetOptions( ScAsciiOptions& rOpt )
+     {
+         rOpt.SetFieldSeps( GetSeparators() );
+         rOpt.SetMergeSeps( aCkbAsOnce.IsChecked() );
+-        rOpt.SetQuotedAsText(aCkbQuotedAsText.IsChecked());
+         rOpt.SetTextSep( lcl_CharFromCombo( aCbTextSep, aTextSepList ) );
+     }
++
++    rOpt.SetQuotedAsText(aCkbQuotedAsText.IsChecked());
++    rOpt.SetDetectSpecialNumber(aCkbDetectNumber.IsChecked());
+ }
+ 
+ void ScImportAsciiDlg::SetTextToColumnsMode()
+@@ -490,6 +506,8 @@ void ScImportAsciiDlg::SetTextToColumnsMode()
+     SetText( maStrTextToColumns );
+     aFtCharSet.Disable();
+     aLbCharSet.Disable();
++    aLbCustomLang.SelectLanguage(LANGUAGE_SYSTEM);
++    aLbCustomLang.Disable();
+     aFtRow.Disable();
+     aNfRow.Disable();
+ 
+@@ -532,7 +550,6 @@ void ScImportAsciiDlg::SetupSeparatorCtrls()
+     aCkbOther.Enable( bEnable );
+     aEdOther.Enable( bEnable );
+     aCkbAsOnce.Enable( bEnable );
+-    aCkbQuotedAsText.Enable( bEnable );
+     aFtTextSep.Enable( bEnable );
+     aCbTextSep.Enable( bEnable );
+ }
+diff --git sc/source/ui/docshell/impex.cxx sc/source/ui/docshell/impex.cxx
+index 15894a3..612ec41 100644
+--- sc/source/ui/docshell/impex.cxx
++++ sc/source/ui/docshell/impex.cxx
+@@ -794,6 +794,7 @@ BOOL ScImportExport::Text2Doc( SvStream& rStrm )
+ 
+ static bool lcl_PutString( 
+     ScDocument* pDoc, SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rStr, BYTE nColFormat,
++    SvNumberFormatter* pFormatter, bool bDetectNumFormat,
+     ::utl::TransliterationWrapper& rTransliteration, CalendarWrapper& rCalendar,
+     ::utl::TransliterationWrapper* pSecondTransliteration, CalendarWrapper* pSecondCalendar )
+ {
+@@ -811,10 +812,10 @@ static bool lcl_PutString(
+     {
+         //!	SetString mit Extra-Flag ???
+ 
+-        SvNumberFormatter* pFormatter = pDoc->GetFormatTable();
+-        sal_uInt32 nEnglish = pFormatter->GetStandardIndex(LANGUAGE_ENGLISH_US);
++        SvNumberFormatter* pDocFormatter = pDoc->GetFormatTable();
++        sal_uInt32 nEnglish = pDocFormatter->GetStandardIndex(LANGUAGE_ENGLISH_US);
+         double fVal;
+-        if ( pFormatter->IsNumberFormat( rStr, nEnglish, fVal ) )
++        if ( pDocFormatter->IsNumberFormat( rStr, nEnglish, fVal ) )
+         {
+             //	Zahlformat wird nicht auf englisch gesetzt
+             pDoc->SetValue( nCol, nRow, nTab, fVal );
+@@ -950,9 +951,9 @@ static bool lcl_PutString(
+                 }
+             }
+ 
+-            SvNumberFormatter* pFormatter = pDoc->GetFormatTable();
++            SvNumberFormatter* pDocFormatter = pDoc->GetFormatTable();
+             if ( nYear < 100 )
+-                nYear = pFormatter->ExpandTwoDigitYear( nYear );
++                nYear = pDocFormatter->ExpandTwoDigitYear( nYear );
+ 
+             CalendarWrapper* pCalendar = (bSecondCal ? pSecondCalendar : &rCalendar);
+             sal_Int16 nNumMonths = pCalendar->getNumberOfMonthsInYear();
+@@ -988,7 +989,7 @@ static bool lcl_PutString(
+                 pCalendar->setValue( i18n::CalendarFieldIndex::MILLISECOND, nMilli );
+                 if ( pCalendar->isValid() )
+                 {
+-                    double fDiff = DateTime(*pFormatter->GetNullDate()) -
++                    double fDiff = DateTime(*pDocFormatter->GetNullDate()) -
+                         pCalendar->getEpochStart();
+                     // #i14974# must use getLocalDateTime to get the same
+                     // date values as set above
+@@ -1000,10 +1001,10 @@ static bool lcl_PutString(
+                     LanguageType eDocLang = eLatin;     //! which language for date formats?
+ 
+                     short nType = (nFound > 3 ? NUMBERFORMAT_DATETIME : NUMBERFORMAT_DATE);
+-                    ULONG nFormat = pFormatter->GetStandardFormat( nType, eDocLang );
++                    ULONG nFormat = pDocFormatter->GetStandardFormat( nType, eDocLang );
+                     // maybe there is a special format including seconds or milliseconds
+                     if (nFound > 5)
+-                        nFormat = pFormatter->GetStandardFormat( fDays, nFormat, nType, eDocLang);
++                        nFormat = pDocFormatter->GetStandardFormat( fDays, nFormat, nType, eDocLang);
+ 
+                     pDoc->PutCell( nCol, nRow, nTab, new ScValueCell(fDays), nFormat, FALSE );
+ 
+@@ -1015,7 +1016,7 @@ static bool lcl_PutString(
+ 
+     // Standard or date not determined -> SetString / EditCell
+     if( rStr.Search( _LF ) == STRING_NOTFOUND )
+-        pDoc->SetString( nCol, nRow, nTab, rStr );
++        pDoc->SetString( nCol, nRow, nTab, rStr, pFormatter, bDetectNumFormat );
+     else 
+     {
+         bMultiLine = true;
+@@ -1025,7 +1026,7 @@ static bool lcl_PutString(
+ }
+ 
+ 
+-String lcl_GetFixed( const String& rLine, xub_StrLen nStart, xub_StrLen nNext )
++String lcl_GetFixed( const String& rLine, xub_StrLen nStart, xub_StrLen nNext, bool& rbIsQuoted )
+ {
+     xub_StrLen nLen = rLine.Len();
+     if (nNext > nLen)
+@@ -1039,7 +1040,16 @@ String lcl_GetFixed( const String& rLine, xub_StrLen nStart, xub_StrLen nNext )
+     while ( nSpace > nStart && pStr[nSpace-1] == ' ' )
+         --nSpace;
+ 
+-    return rLine.Copy( nStart, nSpace-nStart );
++    fprintf(stdout, "lcl_GetFixed:   string = '%s'  first = '%s'  last = '%s'\n", 
++            rtl::OUStringToOString(rLine.Copy(nStart, nSpace-nStart), RTL_TEXTENCODING_UTF8).getStr(),
++            rtl::OUStringToOString(String(pStr[nStart]), RTL_TEXTENCODING_UTF8).getStr(), 
++            rtl::OUStringToOString(String(pStr[nSpace-1]), RTL_TEXTENCODING_UTF8).getStr());
++
++    rbIsQuoted = (pStr[nStart] == sal_Unicode('"') && pStr[nSpace-1] == sal_Unicode('"'));
++    if (rbIsQuoted)
++        return rLine.Copy(nStart+1, nSpace-nStart-2);
++    else
++        return rLine.Copy(nStart, nSpace-nStart);
+ }
+ 
+ BOOL ScImportExport::ExtText2Doc( SvStream& rStrm )
+@@ -1072,9 +1082,9 @@ BOOL ScImportExport::ExtText2Doc( SvStream& rStrm )
+     const BYTE* pColFormat  = pExtOptions->GetColFormat();
+     long nSkipLines	= pExtOptions->GetStartRow();
+ 
+-    LanguageType eLatin, eCjk, eCtl;
+-    pDoc->GetLanguage( eLatin, eCjk, eCtl );
+-    LanguageType eDocLang = eLatin;					//! which language for date formats?
++    LanguageType eDocLang = pExtOptions->GetLanguage();
++    SvNumberFormatter aNumFormatter(pDoc->GetServiceManager(), eDocLang);
++    bool bDetectNumFormat = pExtOptions->IsDetectSpecialNumber();
+ 
+     // For date recognition
+     ::utl::TransliterationWrapper aTransliteration(
+@@ -1116,6 +1126,8 @@ BOOL ScImportExport::ExtText2Doc( SvStream& rStrm )
+     // survives the toggle of bDetermineRange down at the end of the do{} loop.
+     bool bRangeIsDetermined = bDetermineRange;
+ 
++    bool bQuotedAsText = pExtOptions && pExtOptions->IsQuotedAsText();
++
+     ULONG nOriginalStreamPos = rStrm.Tell();
+  
+     do
+@@ -1137,7 +1149,8 @@ BOOL ScImportExport::ExtText2Doc( SvStream& rStrm )
+                 // SC_COL_SKIP.
+                 for ( i=0; i<nInfoCount && nCol <= MAXCOL+1; i++ )
+                 {
+-                    if ( pColFormat[i] != SC_COL_SKIP )		// sonst auch nCol nicht hochzaehlen
++                    BYTE nFmt = pColFormat[i];
++                    if (nFmt != SC_COL_SKIP)        // sonst auch nCol nicht hochzaehlen
+                     {
+                         if (nCol > MAXCOL)
+                             bOverflow = TRUE;       // display warning on import
+@@ -1145,11 +1158,15 @@ BOOL ScImportExport::ExtText2Doc( SvStream& rStrm )
+                         {
+                             xub_StrLen nStart = pColStart[i];
+                             xub_StrLen nNext = ( i+1 < nInfoCount ) ? pColStart[i+1] : nLineLen;
+-                            aCell = lcl_GetFixed( aLine, nStart, nNext );
+-                            bMultiLine |= lcl_PutString( pDoc, nCol, nRow,
+-                                    nTab, aCell, pColFormat[i],
+-                                    aTransliteration, aCalendar,
+-                                    pEnglishTransliteration, pEnglishCalendar);
++                            bool bIsQuoted = false;
++                            aCell = lcl_GetFixed( aLine, nStart, nNext, bIsQuoted );
++                            if (bIsQuoted && bQuotedAsText)
++                                nFmt = SC_COL_TEXT;
++
++                            bMultiLine |= lcl_PutString( 
++                                pDoc, nCol, nRow, nTab, aCell, nFmt,
++                                &aNumFormatter, bDetectNumFormat, aTransliteration, aCalendar,
++                                pEnglishTransliteration, pEnglishCalendar);
+                         }
+                         ++nCol;
+                     }
+@@ -1185,13 +1202,13 @@ BOOL ScImportExport::ExtText2Doc( SvStream& rStrm )
+                             bOverflow = TRUE;       // display warning on import
+                         else if (!bDetermineRange)
+                         {
+-                            if (bIsQuoted && pExtOptions && pExtOptions->IsQuotedAsText())
++                            if (bIsQuoted && bQuotedAsText)
+                                 nFmt = SC_COL_TEXT;
+ 
+-                            bMultiLine |= lcl_PutString( pDoc, nCol, nRow,
+-                                    nTab, aCell, nFmt, aTransliteration,
+-                                    aCalendar, pEnglishTransliteration,
+-                                    pEnglishCalendar);
++                            bMultiLine |= lcl_PutString( 
++                                pDoc, nCol, nRow, nTab, aCell, nFmt, 
++                                &aNumFormatter, bDetectNumFormat, aTransliteration,
++                                aCalendar, pEnglishTransliteration, pEnglishCalendar);
+                         }
+                         ++nCol;
+                     }
+diff --git sc/source/ui/inc/asciiopt.hxx sc/source/ui/inc/asciiopt.hxx
+index 8edd920..d3f9ba4 100644
+--- sc/source/ui/inc/asciiopt.hxx
++++ sc/source/ui/inc/asciiopt.hxx
+@@ -55,7 +55,7 @@
+ #include <tools/stream.hxx>
+ #include <svx/txencbox.hxx>
+ #include "csvtablebox.hxx"
+-
++#include "i18npool/lang.h"
+ 
+ // ============================================================================
+ 
+@@ -66,8 +66,10 @@ private:
+     String		aFieldSeps;
+     BOOL		bMergeFieldSeps;
+     bool        bQuotedFieldAsText;
++    bool        bDetectSpecialNumber;
+     sal_Unicode	cTextSep;
+     CharSet		eCharSet;
++    LanguageType eLang;
+     BOOL		bCharSetSystem;
+     long		nStartRow;
+     USHORT		nInfoCount;
+@@ -95,12 +97,14 @@ public:
+     const String&		GetFieldSeps() const	{ return aFieldSeps; }
+     BOOL				IsMergeSeps() const		{ return bMergeFieldSeps; }
+     bool                IsQuotedAsText() const  { return bQuotedFieldAsText; }
++    bool                IsDetectSpecialNumber() const { return bDetectSpecialNumber; }
+     sal_Unicode			GetTextSep() const		{ return cTextSep; }
+     BOOL				IsFixedLen() const		{ return bFixedLen; }
+     USHORT				GetInfoCount() const	{ return nInfoCount; }
+     const xub_StrLen*	GetColStart() const		{ return pColStart; }
+     const BYTE*			GetColFormat() const	{ return pColFormat; }
+     long				GetStartRow() const		{ return nStartRow; }
++    LanguageType        GetLanguage() const     { return eLang; }
+ 
+     void	SetCharSet( CharSet eNew )			{ eCharSet = eNew; }
+     void	SetCharSetSystem( BOOL bSet )		{ bCharSetSystem = bSet; }
+@@ -108,8 +112,10 @@ public:
+     void	SetFieldSeps( const String& rStr )	{ aFieldSeps = rStr; }
+     void	SetMergeSeps( BOOL bSet )			{ bMergeFieldSeps = bSet; }
+     void    SetQuotedAsText(bool bSet)          { bQuotedFieldAsText = bSet; }
++    void    SetDetectSpecialNumber(bool bSet)   { bDetectSpecialNumber = bSet; }
+     void	SetTextSep( sal_Unicode c )			{ cTextSep = c; }
+     void	SetStartRow( long nRow)				{ nStartRow= nRow; }
++    void    SetLanguage(LanguageType e)         { eLang = e; }
+ 
+     void	SetColInfo( USHORT nCount, const xub_StrLen* pStart, const BYTE* pFormat );
+     void    SetColumnInfo( const ScCsvExpDataVec& rDataVec );
+diff --git sc/source/ui/inc/scuiasciiopt.hxx sc/source/ui/inc/scuiasciiopt.hxx
+index 7097838..4515a86 100644
+--- sc/source/ui/inc/scuiasciiopt.hxx
++++ sc/source/ui/inc/scuiasciiopt.hxx
+@@ -35,6 +35,8 @@
+ 
+ 
+ #include "asciiopt.hxx"
++#include "svx/langbox.hxx"
++
+ // ============================================================================
+ 
+ class ScImportAsciiDlg : public ModalDialog
+@@ -49,6 +51,8 @@ class ScImportAsciiDlg : public ModalDialog
+     FixedLine                   aFlFieldOpt;
+     FixedText                   aFtCharSet;
+     SvxTextEncodingBox          aLbCharSet;
++    FixedText                   aFtCustomLang;
++    SvxLanguageBox              aLbCustomLang;
+ 
+     FixedText                   aFtRow;
+     NumericField                aNfRow;
+@@ -64,7 +68,12 @@ class ScImportAsciiDlg : public ModalDialog
+     CheckBox                    aCkbOther;
+     Edit                        aEdOther;
+     CheckBox                    aCkbAsOnce;
++
++    FixedLine                   aFlOtherOpt;
++
+     CheckBox                    aCkbQuotedAsText;
++    CheckBox                    aCkbDetectNumber;
++
+     FixedText                   aFtTextSep;
+     ComboBox                    aCbTextSep;
+ 
