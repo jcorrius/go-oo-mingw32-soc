@@ -1,0 +1,187 @@
+diff --git sc/source/ui/inc/gridwin.hxx sc/source/ui/inc/gridwin.hxx
+index f6be077..944ac44 100644
+--- sc/source/ui/inc/gridwin.hxx
++++ sc/source/ui/inc/gridwin.hxx
+@@ -40,6 +40,7 @@
+ 
+ #include <vector>
+ #include <memory>
++#include <boost/shared_ptr.hpp>
+ 
+ // ---------------------------------------------------------------------------
+ 
+@@ -152,6 +153,25 @@ private:
+     ::sdr::overlay::OverlayObjectList*              mpOOHeader;
+     ::sdr::overlay::OverlayObjectList*              mpOOShrink;
+ 
++    ::boost::shared_ptr<Rectangle> mpAutoFillRect;
++
++    /** 
++     * Stores current visible column and row ranges, used to avoid expensive 
++     * operations on objects that are outside visible area. 
++     */
++    struct VisibleRange
++    {
++        SCCOL mnCol1;
++        SCCOL mnCol2;
++        SCROW mnRow1;
++        SCROW mnRow2;
++
++        VisibleRange();
++
++        bool isInside(SCCOL nCol, SCROW nRow) const;
++    };
++    VisibleRange maVisibleRange;
++
+ private:
+     ScViewData*				pViewData;
+     ScSplitPos				eWhich;
+diff --git sc/source/ui/view/gridwin.cxx sc/source/ui/view/gridwin.cxx
+index b5bb7c6..e842c7d 100644
+--- sc/source/ui/view/gridwin.cxx
++++ sc/source/ui/view/gridwin.cxx
+@@ -389,7 +389,19 @@ sal_Bool lcl_GetHyperlinkCell(ScDocument* pDoc, SCCOL& rPosX, SCROW& rPosY, SCTA
+ 	return bFound;
+ }
+ 
+-//==================================================================
++// ============================================================================
++
++ScGridWindow::VisibleRange::VisibleRange() :
++    mnCol1(0), mnCol2(MAXCOL), mnRow1(0), mnRow2(MAXROW)
++{
++}
++
++bool ScGridWindow::VisibleRange::isInside(SCCOL nCol, SCROW nRow) const
++{
++    return mnCol1 <= nCol && nCol <= mnCol2 && mnRow1 <= nRow && nRow <= mnRow2;
++}
++
++// ============================================================================
+ 
+ //	WB_DIALOGCONTROL noetig fuer UNO-Controls
+ ScGridWindow::ScGridWindow( Window* pParent, ScViewData* pData, ScSplitPos eWhichPos )
+@@ -403,6 +415,7 @@ ScGridWindow::ScGridWindow( Window* pParent, ScViewData* pData, ScSplitPos eWhic
+             mpOODragRect( NULL ),
+             mpOOHeader( NULL ),
+             mpOOShrink( NULL ),
++            mpAutoFillRect(static_cast<Rectangle*>(NULL)),
+             pViewData( pData ),
+             eWhich( eWhichPos ),
+             pNoteMarker( NULL ),
+@@ -1301,30 +1314,17 @@ BOOL ScGridWindow::TestMouse( const MouseEvent& rMEvt, BOOL bAction )
+         ScRange aMarkRange;
+         if (pViewData->GetSimpleArea( aMarkRange ) == SC_MARK_SIMPLE)
+         {
+-            if ( aMarkRange.aStart.Tab() == pViewData->GetTabNo() )
++            if (aMarkRange.aStart.Tab() == pViewData->GetTabNo() && mpAutoFillRect)
+             {
+-                //	Block-Ende wie in DrawAutoFillMark
+-                SCCOL nX = aMarkRange.aEnd.Col();
+-                SCROW nY = aMarkRange.aEnd.Row();
+-
+-                Point aFillPos = pViewData->GetScrPos( nX, nY, eWhich, TRUE );
+-                long nSizeXPix;
+-                long nSizeYPix;
+-                pViewData->GetMergeSizePixel( nX, nY, nSizeXPix, nSizeYPix );
+-                aFillPos.X() += nSizeXPix * nLayoutSign;
+-                aFillPos.Y() += nSizeYPix;
+-                if ( bLayoutRTL )
+-                    aFillPos.X() -= 1;
+-
+                 Point aMousePos = rMEvt.GetPosPixel();
+-                //	Abfrage hier passend zu DrawAutoFillMark
+-                //	(ein Pixel mehr als markiert)
+-                if ( aMousePos.X() >= aFillPos.X()-3 && aMousePos.X() <= aFillPos.X()+4 &&
+-                     aMousePos.Y() >= aFillPos.Y()-3 && aMousePos.Y() <= aFillPos.Y()+4 )
++                if (mpAutoFillRect->IsInside(aMousePos))
+                 {
+-                    SetPointer( Pointer( POINTER_CROSS ) );		//! dickeres Kreuz ?
++                    SetPointer( Pointer( POINTER_CROSS ) );     //! dickeres Kreuz ?
+                     if (bAction)
+                     {
++                        SCCOL nX = aMarkRange.aEnd.Col();
++                        SCROW nY = aMarkRange.aEnd.Row();
++
+                         if ( lcl_IsEditableMatrix( pViewData->GetDocument(), aMarkRange ) )
+                             pViewData->SetDragMode(
+                                 aMarkRange.aStart.Col(), aMarkRange.aStart.Row(), nX, nY, SC_FILL_MATRIX );
+@@ -5274,6 +5274,9 @@ void ScGridWindow::UpdateCursorOverlay()
+     SCCOL nX = pViewData->GetCurX();
+     SCROW nY = pViewData->GetCurY();
+ 
++    if (!maVisibleRange.isInside(nX, nY))
++        return;
++
+     //  don't show the cursor in overlapped cells
+ 
+     ScDocument* pDoc = pViewData->GetDocument();
+@@ -5444,6 +5447,7 @@ void ScGridWindow::UpdateSelectionOverlay()
+ void ScGridWindow::DeleteAutoFillOverlay()
+ {
+     DELETEZ( mpOOAutoFill );
++    mpAutoFillRect.reset();
+ }
+ 
+ void ScGridWindow::UpdateAutoFillOverlay()
+@@ -5464,6 +5468,11 @@ void ScGridWindow::UpdateAutoFillOverlay()
+     {
+         SCCOL nX = aAutoMarkPos.Col();
+         SCROW nY = aAutoMarkPos.Row();
++
++        if (!maVisibleRange.isInside(nX, nY))
++            // Autofill mark is not visible.  Bail out.
++            return;
++
+         SCTAB nTab = pViewData->GetTabNo();
+         ScDocument* pDoc = pViewData->GetDocument();
+         BOOL bLayoutRTL = pDoc->IsLayoutRTL( nTab );
+@@ -5479,7 +5488,7 @@ void ScGridWindow::UpdateAutoFillOverlay()
+ 
+         aFillPos.Y() += nSizeYPix;
+         aFillPos.Y() -= 2;
+-        Rectangle aFillRect( aFillPos, Size(6,6) );
++        mpAutoFillRect.reset(new Rectangle(aFillPos, Size(6, 6)));
+ 
+         //
+         //  convert into logic units
+@@ -5487,7 +5496,7 @@ void ScGridWindow::UpdateAutoFillOverlay()
+ 
+         sdr::overlay::OverlayObjectCell::RangeVector aRanges;
+ 
+-        Rectangle aLogic( PixelToLogic( aFillRect, aDrawMode ) );
++        Rectangle aLogic( PixelToLogic( *mpAutoFillRect, aDrawMode ) );
+ 
+         const basegfx::B2DPoint aTopLeft(aLogic.Left(), aLogic.Top());
+         const basegfx::B2DPoint aBottomRight(aLogic.Right(), aLogic.Bottom());
+@@ -5511,10 +5520,10 @@ void ScGridWindow::UpdateAutoFillOverlay()
+             mpOOAutoFill = new ::sdr::overlay::OverlayObjectList;
+             mpOOAutoFill->append(*pOverlay);
+         }
+-    }
+ 
+-    if ( aOldMode != aDrawMode )
+-        SetMapMode( aOldMode );
++        if ( aOldMode != aDrawMode )
++            SetMapMode( aOldMode );
++    }
+ }
+ 
+ void ScGridWindow::DeleteDragRectOverlay()
+diff --git sc/source/ui/view/gridwin4.cxx sc/source/ui/view/gridwin4.cxx
+index 73e9bb4..a3bf178 100644
+--- sc/source/ui/view/gridwin4.cxx
++++ sc/source/ui/view/gridwin4.cxx
+@@ -451,6 +451,12 @@ void ScGridWindow::Draw( SCCOL nX1, SCROW nY1, SCCOL nX2, SCROW nY2, ScUpdateMod
+     SCROW nYBottom = nPosY + pViewData->VisibleCellsY(eVWhich);
+     if (nYBottom > MAXROW) nYBottom = MAXROW;
+ 
++    // Store the current visible range.
++    maVisibleRange.mnCol1 = nPosX;
++    maVisibleRange.mnCol2 = nXRight;
++    maVisibleRange.mnRow1 = nPosY;
++    maVisibleRange.mnRow2 = nYBottom;
++
+     if (nX1 > nXRight || nY1 > nYBottom)
+         return;											// unsichtbar
+     if (nX2 > nXRight) nX2 = nXRight;
