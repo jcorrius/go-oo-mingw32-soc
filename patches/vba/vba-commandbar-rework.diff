@@ -1,0 +1,2079 @@
+diff --git oovbaapi/ooo/vba/XCommandBarControl.idl oovbaapi/ooo/vba/XCommandBarControl.idl
+index ea0c612..167bce8 100644
+--- oovbaapi/ooo/vba/XCommandBarControl.idl
++++ oovbaapi/ooo/vba/XCommandBarControl.idl
+@@ -54,6 +54,7 @@ interface XCommandBarControl
+     [attribute] string Caption;
+     [attribute] string OnAction;
+     [attribute] boolean Visible;
++    [attribute, readonly] long Type;
+     
+     void Delete() raises ( com::sun::star::script::BasicErrorException );
+     any Controls( [in] any Index ) raises ( com::sun::star::script::BasicErrorException );
+diff --git vbahelper/inc/vbahelper/vbahelper.hxx vbahelper/inc/vbahelper/vbahelper.hxx
+index d8e5a22..3773474 100644
+--- vbahelper/inc/vbahelper/vbahelper.hxx
++++ vbahelper/inc/vbahelper/vbahelper.hxx
+@@ -95,6 +95,8 @@ namespace ooo
+         VBAHELPER_DLLPUBLIC sal_Int32 getPointerStyle( const css::uno::Reference< css::frame::XModel >& );
+         VBAHELPER_DLLPUBLIC void setCursorHelper( const css::uno::Reference< css::frame::XModel >& xModel, const Pointer& rPointer, sal_Bool bOverWrite );
+         VBAHELPER_DLLPUBLIC void setDefaultPropByIntrospection( const css::uno::Any& aObj, const css::uno::Any& aValue  ) throw ( css::uno::RuntimeException );
++        VBAHELPER_DLLPUBLIC css::uno::Any getPropertyValue( const css::uno::Sequence< css::beans::PropertyValue >& aProp, const rtl::OUString& aName );
++        VBAHELPER_DLLPUBLIC sal_Bool setPropertyValue( css::uno::Sequence< css::beans::PropertyValue >& aProp, const rtl::OUString& aName, const css::uno::Any& aValue );
+ 
+ class VBAHELPER_DLLPUBLIC Millimeter
+ {
+diff --git vbahelper/source/vbahelper/makefile.mk vbahelper/source/vbahelper/makefile.mk
+index 61155e6..bd57415 100644
+--- vbahelper/source/vbahelper/makefile.mk
++++ vbahelper/source/vbahelper/makefile.mk
+@@ -46,6 +46,7 @@ SLOFILES=\
+     $(SLO)$/vbacommandbar.obj \
+     $(SLO)$/vbacommandbarcontrols.obj \
+     $(SLO)$/vbacommandbarcontrol.obj \
++    $(SLO)$/vbacommandbarhelper.obj \
+     $(SLO)$/vbaapplicationbase.obj \
+     $(SLO)$/vbawindowbase.obj \
+     $(SLO)$/vbadocumentbase.obj \
+diff --git vbahelper/source/vbahelper/vbacommandbar.cxx vbahelper/source/vbahelper/vbacommandbar.cxx
+index a74ccd5..43abe41 100644
+--- vbahelper/source/vbahelper/vbacommandbar.cxx
++++ vbahelper/source/vbahelper/vbacommandbar.cxx
+@@ -32,6 +32,8 @@
+  *    MA  02111-1307  USA
+  *
+  ************************************************************************/
++#include "vbacommandbar.hxx" 
++#include "vbacommandbarcontrols.hxx" 
+ #include <com/sun/star/ui/XModuleUIConfigurationManagerSupplier.hpp>
+ #include <com/sun/star/frame/XFrame.hpp>
+ #include <com/sun/star/frame/XDesktop.hpp>
+@@ -40,141 +42,13 @@
+ #include <com/sun/star/container/XNameContainer.hpp>
+ #include <ooo/vba/office/MsoBarType.hpp>
+ 
+-#include "vbacommandbar.hxx"
+-#include "vbacommandbarcontrols.hxx"
+-
+ using namespace com::sun::star;
+ using namespace ooo::vba;
+ 
+-ScVbaCommandBar::ScVbaCommandBar( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< frame::XModel >& xModel, sal_Int32 nModuleType ) throw (uno::RuntimeException) : CommandBar_BASE( xParent, xContext ), m_xModel( xModel )
+-{
+-    // it's a menu bar
+-    // only supporting factory menus ( no custom menus )
+-    m_xParentHardRef.set( xParent, uno::UNO_QUERY_THROW );
+-    initCommandBar();
+-    switch( nModuleType )
+-    {
+-        case 0:
+-            m_sMenuModuleName = rtl::OUString::createFromAscii( "com.sun.star.sheet.SpreadsheetDocument" );
+-            break;
+-        case 1:
+-            m_sMenuModuleName = rtl::OUString::createFromAscii( "com.sun.star.text.TextDocument" );
+-            break;
+-        default:
+-            m_sMenuModuleName = rtl::OUString::createFromAscii( "com.sun.star.text.TextDocument" );
+-    }
+-    getMenuSettings();
+-    m_bIsMenu = sal_True;
+-    m_bCustom = sal_False;
+-}
+-ScVbaCommandBar::ScVbaCommandBar( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< frame::XModel >& xModel, rtl::OUString sToolBarName, sal_Bool bTemporary, sal_Bool bCreate ) throw (uno::RuntimeException) :  CommandBar_BASE( xParent, xContext ), m_xModel( xModel )
++ScVbaCommandBar::ScVbaCommandBar( const uno::Reference< ov::XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, VbaCommandBarHelperRef pHelper, const uno::Reference< container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl, sal_Bool bIsMenu, sal_Bool bTemporary ) throw( uno::RuntimeException ) : CommandBar_BASE( xParent, xContext ), pCBarHelper( pHelper ), m_xBarSettings( xBarSettings ), m_sResourceUrl( sResourceUrl ), m_bIsMenu( bIsMenu ), m_bTemporary( bTemporary )
+ {
+-    // it's a tool bar
+-    m_xParentHardRef.set( xParent, uno::UNO_QUERY_THROW );
+-    initCommandBar();
+-    m_bTemporary = bTemporary;
+-    m_bCreate = bCreate;
+-    // get OOo ToolBarName
+-    CommandBarNameMap::const_iterator iter = mCommandBarNameMap.find( sToolBarName.toAsciiLowerCase() );
+-    if( iter != mCommandBarNameMap.end() )
+-    {
+-        m_sToolBarName = iter->second;
+-    }
+-    else
+-    {
+-        m_sToolBarName = sToolBarName;
+-    }
+-    m_sUIName = m_sToolBarName;
+-    m_bIsMenu = sal_False;
+-    getToolBarSettings( m_sToolBarName );
+-}
+-void
+-ScVbaCommandBar::initCommandBar() throw (uno::RuntimeException)
+-{
+-    m_pScVbaCommandBars = dynamic_cast< ScVbaCommandBars* >( m_xParentHardRef.get() );
+-    if ( !m_pScVbaCommandBars )
+-        throw uno::RuntimeException( rtl::OUString::createFromAscii( "Parent needs to be a ScVbaCommandBars"), uno::Reference< uno::XInterface >() );
+-    m_bIsMenu = sal_False;
+-    m_bCustom = sal_False;
+-    m_bTemporary = sal_True;
+-    m_sToolBarName = rtl::OUString::createFromAscii("");
+-    m_sUIName = rtl::OUString::createFromAscii("");
+-    m_sMenuModuleName = m_pScVbaCommandBars->GetModuleName();
+-}
+-void
+-ScVbaCommandBar::getToolBarSettings( rtl::OUString sToolBarName ) throw( uno::RuntimeException )
+-{
+-    rtl::OUString sFactoryToolBar = rtl::OUString::createFromAscii("private:resource/toolbar/") + sToolBarName.toAsciiLowerCase();
+-    rtl::OUString sCustomToolBar = rtl::OUString::createFromAscii("private:resource/toolbar/custom_toolbar_") + sToolBarName;
+-    uno::Reference< lang::XMultiServiceFactory > xMSF( mxContext->getServiceManager(), uno::UNO_QUERY_THROW );
+-    uno::Reference< ui::XModuleUIConfigurationManagerSupplier > xUICfgManagerSup( xMSF->createInstance(rtl::OUString::createFromAscii("com.sun.star.ui.ModuleUIConfigurationManagerSupplier") ), uno::UNO_QUERY_THROW );
+-    m_xUICfgManager.set( xUICfgManagerSup->getUIConfigurationManager( m_pScVbaCommandBars->GetModuleName() ), uno::UNO_QUERY_THROW );
+-    m_xUICfgPers.set( m_xUICfgManager, uno::UNO_QUERY_THROW );
+-    if( m_xUICfgManager->hasSettings( sFactoryToolBar ) )
+-    {
+-        // exsiting standard ToolBar
+-        m_xBarSettings.set( m_xUICfgManager->getSettings( sFactoryToolBar, sal_True ), uno::UNO_QUERY_THROW );
+-        m_sToolBarName = sFactoryToolBar;
+-    }
+-    else if( m_xUICfgManager->hasSettings( sCustomToolBar ) )
+-    {
+-        // exisiting custom ToolBar
+-        m_xBarSettings.set( m_xUICfgManager->getSettings( sCustomToolBar, sal_True ), uno::UNO_QUERY_THROW );
+-        m_sToolBarName = sCustomToolBar;
+-        m_bCustom = sal_True;
+-    }
+-    else if( m_bCreate )
+-    {
+-        // new custom ToolBar
+-        m_xBarSettings.set( m_xUICfgManager->createSettings(), uno::UNO_QUERY_THROW );
+-        m_sToolBarName = sCustomToolBar;
+-        m_bCustom = sal_True;
+-        addCustomBar();
+-    }
+-    else
+-        throw uno::RuntimeException( rtl::OUString::createFromAscii("ToolBar do not exist"), uno::Reference< uno::XInterface >() );
+-    if( m_pScVbaCommandBars->GetWindows()->hasByName( m_sToolBarName ) )
+-    {
+-        uno::Any aToolBar = m_pScVbaCommandBars->GetWindows()->getByName( m_sToolBarName );
+-        aToolBar >>= m_aToolBar; 
+-    }
+ }
+-void
+-ScVbaCommandBar::addCustomBar()
+-{
+-    uno::Reference< beans::XPropertySet > xPropertySet( m_xBarSettings, uno::UNO_QUERY_THROW );
+-    xPropertySet->setPropertyValue(rtl::OUString::createFromAscii("UIName"), uno::makeAny( m_sUIName ));
+ 
+-    if( m_xUICfgManager->hasSettings(m_sToolBarName) )
+-    {
+-        m_xUICfgManager->replaceSettings( m_sToolBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+-    }
+-    else
+-    {
+-        m_xUICfgManager->insertSettings( m_sToolBarName,  uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+-    }
+-    if( !m_bTemporary )
+-    {
+-        m_xUICfgPers->store();
+-    }
+-}
+-void 
+-ScVbaCommandBar::getMenuSettings()
+-{
+-    try
+-    {
+-        rtl::OUString sMenuBar = rtl::OUString::createFromAscii( "private:resource/menubar/menubar" );
+-        uno::Reference< lang::XMultiServiceFactory > xMSF( mxContext->getServiceManager(), uno::UNO_QUERY_THROW );
+-        uno::Reference< ui::XModuleUIConfigurationManagerSupplier > xUICfgManagerSup( xMSF->createInstance(rtl::OUString::createFromAscii("com.sun.star.ui.ModuleUIConfigurationManagerSupplier") ), uno::UNO_QUERY_THROW );
+-        m_xUICfgManager.set( xUICfgManagerSup->getUIConfigurationManager( m_sMenuModuleName ), uno::UNO_QUERY_THROW );
+-        m_xUICfgPers.set( m_xUICfgManager, uno::UNO_QUERY_THROW );
+-        m_xBarSettings.set( m_xUICfgManager->getSettings( sMenuBar, sal_True ), uno::UNO_QUERY_THROW );
+-    } 
+-    catch ( uno::Exception e)
+-    {
+-        OSL_TRACE( "getMenuSetting got a error\n" );
+-    }
+-}
+ ::rtl::OUString SAL_CALL
+ ScVbaCommandBar::getName() throw ( uno::RuntimeException )
+ {
+@@ -183,25 +57,27 @@ ScVbaCommandBar::getName() throw ( uno::RuntimeException )
+     uno::Any aName = xPropertySet->getPropertyValue( rtl::OUString::createFromAscii("UIName") );
+     rtl::OUString sName;
+     aName >>= sName;
+-    if( sName.getLength() < 1 && !m_bIsMenu )
++    if( sName.getLength() < 1 )
+     {
+-        uno::Reference< container::XNameAccess > xNameAccess( m_pScVbaCommandBars->GetWindows(), uno::UNO_QUERY_THROW );
+-        if( xNameAccess->hasByName( m_sToolBarName ) )
++        if( m_bIsMenu )
+         {
+-            beans::PropertyValues aToolBar; 
+-            xNameAccess->getByName( m_sToolBarName ) >>= aToolBar;
+-            sal_Int32 nCount = aToolBar.getLength();
+-            beans::PropertyValue aPropertyValue;
+-            for( sal_Int32 i = 0; i < nCount; i++ )
++            if( m_sResourceUrl.equals( VbaCommandBarHelper::getMenuBarUrl() ) )
+             {
+-                aPropertyValue = aToolBar[i];
+-                if( aPropertyValue.Name.equals( rtl::OUString::createFromAscii("UIName") ) )
+-                {
+-                    aPropertyValue.Value >>= sName;
+-                    return sName;
+-                }
++                if( pCBarHelper->getModuleId().equalsAscii("com.sun.star.sheet.SpreadsheetDocument") )
++                    sName = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Worksheet Menu Bar") );
++                else if( pCBarHelper->getModuleId().equalsAscii("com.sun.star.text.TextDocument") )
++                    sName = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Menu Bar") );
++                return sName;    
+             }
+         }
++        // Toolbar name
++        uno::Reference< container::XNameAccess > xNameAccess = pCBarHelper->getPersistentWindowState();
++        if( xNameAccess->hasByName( m_sResourceUrl ) )
++        {
++            uno::Sequence< beans::PropertyValue > aToolBar; 
++            xNameAccess->getByName( m_sResourceUrl ) >>= aToolBar;
++            getPropertyValue( aToolBar, rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("UIName") ) ) >>= sName;
++        }
+     }
+     return sName;
+ }
+@@ -210,33 +86,37 @@ ScVbaCommandBar::setName( const ::rtl::OUString& _name ) throw (uno::RuntimeExce
+ {
+     uno::Reference< beans::XPropertySet > xPropertySet( m_xBarSettings, uno::UNO_QUERY_THROW );
+     xPropertySet->setPropertyValue( rtl::OUString::createFromAscii("UIName"), uno::makeAny( _name ) );
+-    uno::Reference< container::XIndexAccess > xIndexAccess( m_xBarSettings, uno::UNO_QUERY_THROW );
+     
+-    if( m_xUICfgManager->hasSettings( m_sToolBarName ) )
++    if( pCBarHelper->getAppCfgManager()->hasSettings( m_sResourceUrl ) )
+     {
+-        m_xUICfgManager->replaceSettings( m_sToolBarName, xIndexAccess );
++        pCBarHelper->getAppCfgManager()->replaceSettings( m_sResourceUrl, m_xBarSettings );
+     }
+     else
+     {
+-        // toolbar not found
++        pCBarHelper->getAppCfgManager()->insertSettings( m_sResourceUrl, m_xBarSettings );
+     }
+     if( !m_bTemporary )
+     {
+-        m_xUICfgPers->store();
++        pCBarHelper->persistChanges();
+     }
+ }
+ ::sal_Bool SAL_CALL 
+ ScVbaCommandBar::getVisible() throw (uno::RuntimeException)
+ {
++    // menu bar is allways visible in OOo 
++    if( m_bIsMenu )
++        return sal_True;
++
+     sal_Bool bVisible = sal_False;
+     try
+     {
+-        sal_Int32 i = 0;
+-        while( !m_aToolBar[i].Name.equals( rtl::OUString::createFromAscii( "Visible" ) ) )
++        uno::Reference< container::XNameAccess > xNameAccess = pCBarHelper->getPersistentWindowState();
++        if( xNameAccess->hasByName( m_sResourceUrl ) )
+         {
+-            i++;
++            uno::Sequence< beans::PropertyValue > aToolBar; 
++            xNameAccess->getByName( m_sResourceUrl ) >>= aToolBar;
++            getPropertyValue( aToolBar, rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Visible") ) ) >>= bVisible;
+         }
+-        m_aToolBar[i].Value >>= bVisible;
+     }
+     catch ( uno::Exception e )
+     {
+@@ -248,18 +128,18 @@ ScVbaCommandBar::setVisible( ::sal_Bool _visible ) throw (uno::RuntimeException)
+ {
+     try
+     {
+-        uno::Reference< frame::XFrame > xFrame( m_xModel->getCurrentController()->getFrame(), uno::UNO_QUERY_THROW ); 
++        uno::Reference< frame::XFrame > xFrame( pCBarHelper->getModel()->getCurrentController()->getFrame(), uno::UNO_QUERY_THROW ); 
+         uno::Reference< beans::XPropertySet > xPropertySet( xFrame, uno::UNO_QUERY_THROW );
+         uno::Reference< frame::XLayoutManager > xLayoutManager( xPropertySet->getPropertyValue( rtl::OUString::createFromAscii("LayoutManager") ), uno::UNO_QUERY_THROW );
+         if( _visible )
+         {
+-            xLayoutManager->createElement( m_sToolBarName );
+-            xLayoutManager->showElement( m_sToolBarName );
++            xLayoutManager->createElement( m_sResourceUrl );
++            xLayoutManager->showElement( m_sResourceUrl );
+         }
+         else
+         {
+-            xLayoutManager->hideElement( m_sToolBarName );
+-            xLayoutManager->destroyElement( m_sToolBarName );
++            xLayoutManager->hideElement( m_sResourceUrl );
++            xLayoutManager->destroyElement( m_sResourceUrl );
+         }
+     }
+     catch( uno::Exception e )
+@@ -284,45 +164,35 @@ ScVbaCommandBar::setEnabled( sal_Bool/* _enabled */ ) throw (uno::RuntimeExcepti
+ }
+ 
+ void SAL_CALL 
+-ScVbaCommandBar::Delete(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
++ScVbaCommandBar::Delete(  ) throw (script::BasicErrorException, uno::RuntimeException)
+ {
+-    if( m_bCustom )
++    if( pCBarHelper->getAppCfgManager()->hasSettings( m_sResourceUrl ) )
+     {
+-        if( m_xUICfgManager->hasSettings( m_sToolBarName ) )
+-        {
+-            m_xUICfgManager->removeSettings(m_sToolBarName);
+-            // make it permanent
+-            if( !m_bTemporary )
+-            {
+-                m_xUICfgPers->store();
+-            }
+-        }
+-        else
++        pCBarHelper->getAppCfgManager()->removeSettings(m_sResourceUrl);
++        // make it permanent
++        if( !m_bTemporary )
+         {
+-            // toolbar not found
+-            // TODO throw Error
+-        }
+-        uno::Reference< container::XNameContainer > xNameContainer( m_pScVbaCommandBars->GetWindows(), uno::UNO_QUERY_THROW );
+-        if( xNameContainer->hasByName( m_sToolBarName ) )
+-        {
+-            xNameContainer->removeByName( m_sToolBarName );
++            pCBarHelper->persistChanges();
+         }
+     }
++    else
++    {
++        // toolbar not found
++        // TODO throw Error
++    }
++    uno::Reference< container::XNameContainer > xNameContainer( pCBarHelper->getPersistentWindowState(), uno::UNO_QUERY_THROW );
++    if( xNameContainer->hasByName( m_sResourceUrl ) )
++    {
++        xNameContainer->removeByName( m_sResourceUrl );
++    }
+ }
+ uno::Any SAL_CALL 
+ ScVbaCommandBar::Controls( const uno::Any& aIndex ) throw (script::BasicErrorException, uno::RuntimeException)
+ {
+-    sal_Int32 nIndex;
+-    uno::Reference< XCommandBarControls > xCommandBarControls( new ScVbaCommandBarControls( this, mxContext, uno::Reference< container::XIndexAccess >(), m_xModel ) );
++    uno::Reference< XCommandBarControls > xCommandBarControls( new ScVbaCommandBarControls( this, mxContext, m_xBarSettings, pCBarHelper, m_xBarSettings, m_sResourceUrl ) );
+     if( aIndex.hasValue() )
+     {
+-        if( aIndex >>= nIndex )
+-        {
+-            uno::Reference< XCommandBarControl > xCommandBarControl( xCommandBarControls->Item( aIndex, uno::Any() ), uno::UNO_QUERY_THROW );
+-            return uno::makeAny( xCommandBarControl );
+-        }
+-        else
+-            throw uno::RuntimeException( rtl::OUString::createFromAscii(  "invalid index" ), uno::Reference< uno::XInterface >() );
++        return xCommandBarControls->Item( aIndex, uno::Any() );
+     }
+     return uno::makeAny( xCommandBarControls );
+ }
+diff --git vbahelper/source/vbahelper/vbacommandbar.hxx vbahelper/source/vbahelper/vbacommandbar.hxx
+index 52f63bc..5c9b13e 100644
+--- vbahelper/source/vbahelper/vbacommandbar.hxx
++++ vbahelper/source/vbahelper/vbacommandbar.hxx
+@@ -42,52 +42,25 @@
+ #include <com/sun/star/beans/PropertyValues.hpp>
+ 
+ #include <vbahelper/vbahelperinterface.hxx>
+-#include "vbacommandbars.hxx"
++#include "vbacommandbarhelper.hxx"
+ 
+ #include <map>
+-typedef std::map< const rtl::OUString, rtl::OUString > CommandBarNameMap;
+-typedef std::pair< const rtl::OUString, rtl::OUString > CommandBarNamePair;
+-const CommandBarNamePair namePair[] = { 
+-    CommandBarNamePair(  rtl::OUString::createFromAscii("standard"), rtl::OUString::createFromAscii("standardbar") ),
+-    CommandBarNamePair(  rtl::OUString::createFromAscii("formatting"), rtl::OUString::createFromAscii("formatobjectbar") ),
+-};
+-static const CommandBarNameMap mCommandBarNameMap( namePair, ( namePair + sizeof(namePair) / sizeof(namePair[0]) ) );
+-
+ 
+ typedef InheritedHelperInterfaceImpl1< ov::XCommandBar > CommandBar_BASE;
+ 
+ class ScVbaCommandBar : public CommandBar_BASE
+ {
+ private:
+-    rtl::OUString       m_sToolBarName;
+-    rtl::OUString       m_sMenuModuleName;
+-    rtl::OUString       m_sUIName;
+-    sal_Bool            m_bTemporary;
+-    sal_Bool            m_bIsMenu;
+-    sal_Bool            m_bCustom;
+-    sal_Bool            m_bCreate;
+-    ScVbaCommandBars*   m_pScVbaCommandBars;
+-    css::beans::PropertyValues  m_aToolBar;
+-    // hard reference for parent
+-    css::uno::Reference< ov::XHelperInterface >               m_xParentHardRef;
+-    css::uno::Reference< css::ui::XUIConfigurationManager >         m_xUICfgManager;
+-    css::uno::Reference< css::ui::XUIConfigurationPersistence >     m_xUICfgPers;
+-    css::uno::Reference< css::container::XIndexContainer >          m_xBarSettings;
+-    void initCommandBar() throw( css::uno::RuntimeException );
+-protected:
+-    void getToolBarSettings( rtl::OUString sToolBarName ) throw( css::uno::RuntimeException );
+-    void getMenuSettings();
+-    void addCustomBar();
+-    css::uno::Reference< css::frame::XModel > m_xModel;
++    VbaCommandBarHelperRef pCBarHelper;
++    css::uno::Reference< css::container::XIndexAccess > m_xBarSettings;
++    rtl::OUString   m_sResourceUrl;
++    sal_Bool        m_bIsMenu;
++    sal_Bool        m_bTemporary;
++
+ public:
+-    ScVbaCommandBar( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::frame::XModel >& xModel, sal_Int32 nModuleType ) throw( css::uno::RuntimeException );
+-    ScVbaCommandBar( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::frame::XModel >& xModel, rtl::OUString sToolBarName, sal_Bool bTemporary, sal_Bool bCreate ) throw( css::uno::RuntimeException );
++    ScVbaCommandBar( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, VbaCommandBarHelperRef pHelper, const css::uno::Reference< css::container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl, sal_Bool bIsMenu, sal_Bool bTemporary = sal_True ) throw( css::uno::RuntimeException );
+     
+-    sal_Bool IsMenu() { return m_bIsMenu; };
+-    css::uno::Reference< css::ui::XUIConfigurationManager > GetUICfgManager() { return m_xUICfgManager; };
+-    css::uno::Reference< css::ui::XUIConfigurationPersistence > GetUICfgPers() { return m_xUICfgPers; };
+-    css::uno::Reference< css::container::XIndexContainer > GetBarSettings() { return m_xBarSettings; };
+-    rtl::OUString GetToolBarName() { return m_sToolBarName; };
++    sal_Bool IsMenu() { return m_bIsMenu; }
+ 
+     // Attributes
+     virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);
+diff --git vbahelper/source/vbahelper/vbacommandbarcontrol.cxx vbahelper/source/vbahelper/vbacommandbarcontrol.cxx
+index 1bea689..dd20256 100644
+--- vbahelper/source/vbahelper/vbacommandbarcontrol.cxx
++++ vbahelper/source/vbahelper/vbacommandbarcontrol.cxx
+@@ -33,198 +33,29 @@
+  *
+  ************************************************************************/
+ #include "vbacommandbarcontrol.hxx"
+-#include <basic/sbstar.hxx>
+-#include <basic/sbmod.hxx>
+-#include <basic/sbmeth.hxx>
++#include "vbacommandbarcontrols.hxx"
+ #include <vbahelper/vbahelper.hxx>
+ #include <svx/msvbahelper.hxx>
+ 
+ using namespace com::sun::star;
+ using namespace ooo::vba;
+ 
+-uno::Any lcl_getPropertyValue( beans::PropertyValues aPropertyValues, rtl::OUString sPropertyName )
++ScVbaCommandBarControl::ScVbaCommandBarControl( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xSettings, VbaCommandBarHelperRef pHelper, const css::uno::Reference< css::container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl ) throw (css::uno::RuntimeException) : CommandBarControl_BASE( xParent, xContext ), pCBarHelper( pHelper ), m_sResourceUrl( sResourceUrl ), m_xCurrentSettings( xSettings ), m_xBarSettings( xBarSettings ), m_nPosition( 0 ), m_bTemporary( sal_True )
+ {
+-    sal_Int32 nCount = aPropertyValues.getLength();
+-    for( sal_Int32 i = 0; i < nCount; i++ )
+-    {
+-        if( aPropertyValues[i].Name.equalsIgnoreAsciiCase( sPropertyName ) )
+-        {
+-            return aPropertyValues[i].Value;
+-        }
+-    }
+-    return uno::Any();
+-}
+-
+-beans::PropertyValues lcl_repalcePropertyValue( beans::PropertyValues aPropertyValues, rtl::OUString sPropertyName, uno::Any aValue )
+-{
+-    sal_Int32 nCount = aPropertyValues.getLength();
+-    for( sal_Int32 i = 0; i < nCount; i++ )
+-    {
+-        if( aPropertyValues[i].Name.equalsIgnoreAsciiCase( sPropertyName ) )
+-        {
+-            aPropertyValues[i].Value = aValue;
+-            return aPropertyValues;
+-        }
+-    }
+-    return aPropertyValues;
+-}
+-
+-ScVbaCommandBarControl::ScVbaCommandBarControl( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Int32 nType ) throw (uno::RuntimeException) : CommandBarControl_BASE( xParent, xContext ), m_sName( sName ), m_nPosition( nPosition ), m_nType( nType )
+-{
+-    // exsiting CommandBarBarControl
+-    m_xParentHardRef.set( xParent, uno::UNO_QUERY_THROW );
+-    initObjects();
+-    if( m_xBarSettings->hasElements() )
+-    {
+-        ScVbaCommandBarControl* pParentCommandBarControl = m_pCommandBarControls->GetParentCommandBarControl();
+-        if( pParentCommandBarControl )
+-        {
+-            beans::PropertyValues aPropertyValues;
+-            pParentCommandBarControl->GetCurrentSettings()->getByIndex( pParentCommandBarControl->GetPosition() ) >>= aPropertyValues;
+-            pParentCommandBarControl->SetPropertyValues( aPropertyValues );
+-            m_xCurrentSettings.set( lcl_getPropertyValue( pParentCommandBarControl->GetPropertyValues(), rtl::OUString::createFromAscii( "ItemDescriptorContainer" ) ), uno::UNO_QUERY_THROW );
+-        }
+-        if( !m_xCurrentSettings.is() )
+-        {
+-            m_xCurrentSettings.set( m_xUICfgManager->getSettings( m_pCommandBarControls->GetParentToolBarName(), sal_True ), uno::UNO_QUERY_THROW );
+-        }
+-    }
+-    if( m_bIsMenu )
+-    {
+-        m_sBarName = rtl::OUString::createFromAscii("private:resource/menubar/menubar");
+-    }
+-    else
+-    {
+-        m_sBarName = m_pCommandBarControls->GetParentToolBarName();
+-    }
+-    m_bTemporary = sal_True;
+-}
+-ScVbaCommandBarControl::ScVbaCommandBarControl( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary, sal_Int32 nType) throw (uno::RuntimeException) :  CommandBarControl_BASE( xParent, xContext ), m_nPosition( nPosition ), m_bTemporary( bTemporary ), m_nType( nType )
+-{
+-    m_xParentHardRef.set( xParent, uno::UNO_QUERY_THROW );
+-    initObjects();
+-    if( sName.getLength() > 0 )
+-    {
+-        m_sName = sName;
+-    }
+-    m_sCommand = rtl::OUString::createFromAscii("vnd.openoffice.org:") + sName;
+-    if( m_bIsMenu )
+-    {
+-        m_sBarName = rtl::OUString::createFromAscii("private:resource/menubar/menubar");
+-        createNewMenuBarControl();
+-    }
+-    else
+-    {
+-        m_sBarName = m_pCommandBarControls->GetParentToolBarName();
+-        createNewToolBarControl();
+-    }
+ }
+ 
+-void
+-ScVbaCommandBarControl::initObjects() throw (uno::RuntimeException)
++ScVbaCommandBarControl::ScVbaCommandBarControl( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xSettings, VbaCommandBarHelperRef pHelper, const css::uno::Reference< css::container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException) : CommandBarControl_BASE( xParent, xContext ), pCBarHelper( pHelper ), m_sResourceUrl( sResourceUrl ), m_xCurrentSettings( xSettings ), m_xBarSettings( xBarSettings ), m_nPosition( nPosition ), m_bTemporary( bTemporary )
+ {
+-    m_pCommandBarControls = dynamic_cast< ScVbaCommandBarControls* >( m_xParentHardRef.get() );
+-    if( !m_pCommandBarControls )
+-        throw uno::RuntimeException( rtl::OUString::createFromAscii( "Parent needs to be a ScVbaCommandBarControls"), uno::Reference< uno::XInterface >() );
+-    m_xUICfgManager.set( m_pCommandBarControls->GetUICfgManager(), uno::UNO_QUERY_THROW );
+-    m_xUICfgPers.set( m_pCommandBarControls->GetUICfgPers(), uno::UNO_QUERY_THROW );
+-    m_xBarSettings.set( m_pCommandBarControls->GetBarSettings(), uno::UNO_QUERY_THROW );
+-    m_bIsMenu = m_pCommandBarControls->IsMenu();
+-    m_sName = rtl::OUString::createFromAscii( "Custom" );
+-}
+-
+-void
+-ScVbaCommandBarControl::createNewMenuBarControl()
+-{
+-    uno::Reference< lang::XSingleComponentFactory > xMenuMSF( m_xBarSettings, uno::UNO_QUERY_THROW );
+-
+-    uno::Sequence< beans::PropertyValue > aPropertys;
+-    if( m_nType == office::MsoControlType::msoControlPopup )
+-        aPropertys = uno::Sequence< beans::PropertyValue >( 4 );
+-    else
+-        aPropertys = uno::Sequence< beans::PropertyValue >( 3 );
+-
+-    aPropertys[0].Name = rtl::OUString::createFromAscii("CommandURL");
+-    aPropertys[0].Value <<= m_sCommand; 
+-    aPropertys[1].Name = rtl::OUString::createFromAscii("Label");
+-    aPropertys[1].Value <<= m_sName; 
+-    aPropertys[2].Name = rtl::OUString::createFromAscii("Type");
+-    aPropertys[2].Value <<= sal_Int32(0); 
+-
+-    if( m_nType == office::MsoControlType::msoControlPopup )
+-    {
+-        aPropertys[3].Name = rtl::OUString::createFromAscii("ItemDescriptorContainer");
+-        aPropertys[3].Value <<= xMenuMSF->createInstanceWithContext( mxContext );
+-    }    
+-
+-    if( m_pCommandBarControls->GetParentCommandBar() != NULL )
+-    {
+-        // create a new menu
+-        m_xBarSettings->insertByIndex( m_nPosition, uno::makeAny( aPropertys ) );
+-        m_xCurrentSettings.set( m_xBarSettings, uno::UNO_QUERY_THROW );
+-    }
+-    else if( m_pCommandBarControls->GetParentCommandBarControl() != NULL )
+-    {
+-        // create a new menu entry
+-        ScVbaCommandBarControl* pPc = m_pCommandBarControls->GetParentCommandBarControl();
+-        beans::PropertyValues aPropertyValues;
+-        pPc->GetCurrentSettings()->getByIndex( pPc->GetPosition() ) >>= aPropertyValues;
+-        pPc->SetPropertyValues( aPropertyValues );
+-        
+-        // has the property already been set?
+-        if( lcl_getPropertyValue( pPc->GetPropertyValues(), rtl::OUString::createFromAscii("ItemDescriptorContainer") ).hasValue() )
+-        {
+-            lcl_repalcePropertyValue(  pPc->GetPropertyValues(), rtl::OUString::createFromAscii("ItemDescriptorContainer"), uno::makeAny( xMenuMSF->createInstanceWithContext( mxContext ) ) );
+-            pPc->GetCurrentSettings()->replaceByIndex( pPc->GetPosition(), uno::makeAny( pPc->GetPropertyValues() ) );
+-        }
+-        m_xCurrentSettings.set( lcl_getPropertyValue( pPc->GetPropertyValues(), rtl::OUString::createFromAscii("ItemDescriptorContainer") ), uno::UNO_QUERY_THROW );
+-        m_xCurrentSettings->insertByIndex( m_nPosition, uno::makeAny( aPropertys ) );
+-    }
+-    if( m_xUICfgManager->hasSettings( m_sBarName ) )
+-    {
+-        m_xUICfgManager->replaceSettings( m_sBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+-    }
+-    else
+-    {
+-        m_xUICfgManager->insertSettings( m_sBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+-    }
+-    if( !m_bTemporary )
+-    {
+-        m_xUICfgPers->store();
+-    }
++    m_xCurrentSettings->getByIndex( nPosition ) >>= m_aPropertyValues;
+ }
+ 
+-void
+-ScVbaCommandBarControl::createNewToolBarControl()
++void ScVbaCommandBarControl::ApplyChange() throw ( uno::RuntimeException )
+ {
+-    uno::Sequence< beans::PropertyValue > aPropertys(4);
+-    aPropertys[0].Name = rtl::OUString::createFromAscii("CommandURL");
+-    aPropertys[0].Value <<= m_sCommand; 
+-    aPropertys[1].Name = rtl::OUString::createFromAscii("Label");
+-    aPropertys[1].Value <<= m_sName; 
+-    aPropertys[2].Name = rtl::OUString::createFromAscii("Type");
+-    aPropertys[2].Value <<= sal_Int32(0); 
+-    aPropertys[3].Name = rtl::OUString::createFromAscii("IsVisible");
+-    aPropertys[3].Value <<= sal_True; 
+-
+-    m_xBarSettings->insertByIndex( m_nPosition, uno::makeAny( aPropertys ) );
+-    uno::Reference< beans::XPropertySet > xPropertySet( m_xBarSettings, uno::UNO_QUERY_THROW );
+-    rtl::OUString sUIName;
+-    xPropertySet->getPropertyValue( rtl::OUString::createFromAscii("UIName") ) >>= sUIName;
+-
+-    m_xCurrentSettings.set( m_xBarSettings, uno::UNO_QUERY_THROW );
+-    if( m_xUICfgManager->hasSettings( m_sBarName ) )
+-    {
+-        m_xUICfgManager->replaceSettings( m_sBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+-    }
+-    else
+-    {
+-        m_xUICfgManager->insertSettings( m_sBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+-    }
++    uno::Reference< container::XIndexContainer > xIndexContainer( m_xCurrentSettings, uno::UNO_QUERY_THROW );
++    xIndexContainer->replaceByIndex( m_nPosition, uno::makeAny( m_aPropertyValues ) );
++    pCBarHelper->getAppCfgManager()->replaceSettings( m_sResourceUrl, m_xBarSettings );
+     if( !m_bTemporary )
+-    {
+-        m_xUICfgPers->store();
+-    }
++        pCBarHelper->persistChanges();
+ }
+ 
+ ::rtl::OUString SAL_CALL
+@@ -232,145 +63,109 @@ ScVbaCommandBarControl::getCaption() throw ( uno::RuntimeException )
+ {
+     // "Label" always empty
+     rtl::OUString sCaption;
+-    beans::PropertyValues aPropertyValues;
+-    if( m_xCurrentSettings.is() )
+-    {
+-        m_xCurrentSettings->getByIndex( m_nPosition ) >>= aPropertyValues;
+-        lcl_getPropertyValue( aPropertyValues, rtl::OUString::createFromAscii("Label") ) >>= sCaption;
+-    }
+-    else if( m_xBarSettings.is() )
+-    {
+-        m_xBarSettings->getByIndex( m_nPosition ) >>= aPropertyValues;
+-        lcl_getPropertyValue( aPropertyValues, rtl::OUString::createFromAscii("Label") ) >>= sCaption;
+-    }
++    getPropertyValue( m_aPropertyValues, rtl::OUString::createFromAscii("Label") ) >>= sCaption;
+     return sCaption;
+ }
++
+ void SAL_CALL 
+ ScVbaCommandBarControl::setCaption( const ::rtl::OUString& _caption ) throw (uno::RuntimeException)
+ {
+-    if( m_xCurrentSettings.is() )
+-    {
+-        beans::PropertyValues aPropertyValues;
+-        m_xCurrentSettings->getByIndex( m_nPosition ) >>= aPropertyValues;
+-        beans::PropertyValues aNewPropertyValues;
+-        aNewPropertyValues = lcl_repalcePropertyValue( aPropertyValues, rtl::OUString::createFromAscii("Label"), uno::makeAny( _caption ) );
+-        m_xCurrentSettings->replaceByIndex( m_nPosition, uno::makeAny( aNewPropertyValues ) );
+-        if( m_xUICfgManager->hasSettings( m_sBarName ) )
+-        {
+-            m_xUICfgManager->replaceSettings( m_sBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+-        }
+-        else
+-        {
+-            m_xUICfgManager->insertSettings( m_sBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+-        }
+-        // make it permanent
+-        if( !m_bTemporary )
+-        {
+-            m_xUICfgPers->store();
+-        }
+-    }
++    rtl::OUString sCaption = _caption.replace('&','~');
++    setPropertyValue( m_aPropertyValues, rtl::OUString::createFromAscii("Label"), uno::makeAny( sCaption ) );
++    ApplyChange();
+ }
++
+ ::rtl::OUString SAL_CALL 
+ ScVbaCommandBarControl::getOnAction() throw (uno::RuntimeException)
+ {
+-    if( m_xCurrentSettings.is() )
+-    {
+-        beans::PropertyValues aPropertyValues;
+-        m_xCurrentSettings->getByIndex( m_nPosition ) >>= aPropertyValues;
+-        rtl::OUString sCommandURL;
+-        lcl_getPropertyValue( aPropertyValues, rtl::OUString::createFromAscii( "CommandURL" ) ) >>= sCommandURL;
+-        return sCommandURL;
+-    }
+-    return ::rtl::OUString();
++    rtl::OUString sCommandURL;
++    getPropertyValue( m_aPropertyValues, rtl::OUString::createFromAscii("CommandURL") ) >>= sCommandURL;
++    return sCommandURL;
+ }
++
+ void SAL_CALL 
+ ScVbaCommandBarControl::setOnAction( const ::rtl::OUString& _onaction ) throw (uno::RuntimeException)
+ {
+-    if( m_xCurrentSettings.is() )
++    // get the current model
++    uno::Reference< frame::XModel > xModel( pCBarHelper->getModel() ); 
++    VBAMacroResolvedInfo aResolvedMacro = ooo::vba::resolveVBAMacro( getSfxObjShell( xModel ), _onaction, true );
++    if ( aResolvedMacro.IsResolved() )
+     {
+-        // get the current model
+-        VBAMacroResolvedInfo aResolvedMacro = ooo::vba::resolveVBAMacro( getSfxObjShell( m_pCommandBarControls->GetModel() ), _onaction, true );
+-        if ( aResolvedMacro.IsResolved() )
+-        {
+-            rtl::OUString aCommandURL = ooo::vba::makeMacroURL( aResolvedMacro.ResolvedMacro() );
++        rtl::OUString aCommandURL = ooo::vba::makeMacroURL( aResolvedMacro.ResolvedMacro() );
+ 		OSL_TRACE(" ScVbaCommandBarControl::setOnAction: %s", rtl::OUStringToOString( aCommandURL, RTL_TEXTENCODING_UTF8 ).getStr() );
+-            beans::PropertyValues aPropertyValues;
+-            m_xCurrentSettings->getByIndex( m_nPosition ) >>= aPropertyValues;
+-            beans::PropertyValues aNewPropertyValues;
+-            aNewPropertyValues = lcl_repalcePropertyValue( aPropertyValues, rtl::OUString::createFromAscii("CommandURL"), uno::makeAny( aCommandURL ) );
+-            m_xCurrentSettings->replaceByIndex( m_nPosition, uno::makeAny( aNewPropertyValues ) );
+-            if( m_xUICfgManager->hasSettings( m_sBarName ) )
+-            {
+-                m_xUICfgManager->replaceSettings( m_sBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+-            }
+-            else
+-            {
+-                m_xUICfgManager->insertSettings( m_sBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+-            }
+-            // make it permanent
+-            if( !m_bTemporary )
+-            {
+-                m_xUICfgPers->store();
+-            }
+-        }
++        setPropertyValue( m_aPropertyValues, rtl::OUString::createFromAscii("CommandURL"), uno::makeAny( aCommandURL ) );
++        ApplyChange();
+     }
+ }
++
+ ::sal_Bool SAL_CALL 
+ ScVbaCommandBarControl::getVisible() throw (uno::RuntimeException)
+ {
+-    // not possible in UNO?
+-    return sal_True;
++    sal_Bool bVisible = sal_True;
++    uno::Any aValue = getPropertyValue( m_aPropertyValues, rtl::OUString::createFromAscii("IsVisible") );
++    if( aValue.hasValue() )
++        aValue >>= bVisible;
++    return bVisible;
+ }
+ void SAL_CALL 
+-ScVbaCommandBarControl::setVisible( ::sal_Bool /*_visible*/ ) throw (uno::RuntimeException)
++ScVbaCommandBarControl::setVisible( ::sal_Bool _visible ) throw (uno::RuntimeException)
+ {
+-    // "IsVisilbe"
++    uno::Any aValue = getPropertyValue( m_aPropertyValues, rtl::OUString::createFromAscii("IsVisible") );
++    if( aValue.hasValue() )
++    {
++        setPropertyValue( m_aPropertyValues, rtl::OUString::createFromAscii("IsVisible"), uno::makeAny( _visible ) );
++        ApplyChange();
++    }
+ }
++
+ void SAL_CALL 
+-ScVbaCommandBarControl::Delete(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
++ScVbaCommandBarControl::Delete(  ) throw (script::BasicErrorException, uno::RuntimeException)
+ {
+     if( m_xCurrentSettings.is() )
+     {
+-        m_xCurrentSettings->removeByIndex( m_nPosition );
++        uno::Reference< container::XIndexContainer > xIndexContainer( m_xCurrentSettings, uno::UNO_QUERY_THROW );
++        xIndexContainer->removeByIndex( m_nPosition );
+ 
+-        if( m_xUICfgManager->hasSettings( m_sBarName ) )
++        if( pCBarHelper->getAppCfgManager()->hasSettings( m_sResourceUrl ) )
+         {
+-            m_xUICfgManager->replaceSettings( m_sBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
++            pCBarHelper->getAppCfgManager()->replaceSettings( m_sResourceUrl, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+         }
+         else
+         {
+-            m_xUICfgManager->insertSettings( m_sBarName, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
++            pCBarHelper->getAppCfgManager()->insertSettings( m_sResourceUrl, uno::Reference< container::XIndexAccess > (m_xBarSettings, uno::UNO_QUERY_THROW ) );
+         }
+         // make it permanent
+         if( !m_bTemporary )
+         {
+-            m_xUICfgPers->store();
++            pCBarHelper->persistChanges();
+         }
+     }
+ }
++
+ uno::Any SAL_CALL 
+ ScVbaCommandBarControl::Controls( const uno::Any& aIndex ) throw (script::BasicErrorException, uno::RuntimeException)
+ {
+-    sal_Int32 nIndex;
+-    uno::Reference< XCommandBarControls > xCommandBarControls( new ScVbaCommandBarControls( this, mxContext, uno::Reference< container::XIndexAccess >(), m_pCommandBarControls->GetModel() ) );
++    // only Popup Menu has controls
++    uno::Reference< container::XIndexAccess > xSubMenu;
++    getPropertyValue( m_aPropertyValues, rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_CONTAINER ) ) >>= xSubMenu;
++    if( !xSubMenu.is() )
++        throw uno::RuntimeException();
++
++    uno::Reference< XCommandBarControls > xCommandBarControls( new ScVbaCommandBarControls( this, mxContext, xSubMenu, pCBarHelper, m_xBarSettings, m_sResourceUrl ) );
+     if( aIndex.hasValue() )
+     {
+-        if( aIndex >>= nIndex )
+-        {
+-            uno::Reference< XCommandBarControl > xCommandBarControl( xCommandBarControls->Item( aIndex, uno::Any() ), uno::UNO_QUERY_THROW );
+-            return uno::makeAny( xCommandBarControl );
+-        }
+-        else
+-            throw uno::RuntimeException( rtl::OUString::createFromAscii( "invalid index" ), uno::Reference< uno::XInterface >() );
++        return xCommandBarControls->Item( aIndex, uno::Any() );
+     }
+     return uno::makeAny( xCommandBarControls );
+ }
++
+ rtl::OUString& 
+ ScVbaCommandBarControl::getServiceImplName()
+ {
+ 	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaCommandBarControl") );
+ 	return sImplName;
+ }
++
+ uno::Sequence<rtl::OUString> 
+ ScVbaCommandBarControl::getServiceNames()
+ {
+@@ -384,12 +179,11 @@ ScVbaCommandBarControl::getServiceNames()
+ }
+ 
+ //////////// ScVbaCommandBarPopup //////////////////////////////
+-ScVbaCommandBarPopup::ScVbaCommandBarPopup( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition ) throw (uno::RuntimeException) : CommandBarPopup_BASE( xParent, xContext, sName, nPosition, office::MsoControlType::msoControlPopup )
+-{
+-}
+-
+-ScVbaCommandBarPopup::ScVbaCommandBarPopup( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (uno::RuntimeException) : CommandBarPopup_BASE( xParent, xContext, sName, nPosition, bTemporary, office::MsoControlType::msoControlPopup ) 
++ScVbaCommandBarPopup::ScVbaCommandBarPopup( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xSettings, VbaCommandBarHelperRef pHelper, const css::uno::Reference< css::container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException) : CommandBarPopup_BASE( xParent, xContext, xSettings, pHelper, xBarSettings, sResourceUrl )
+ {
++    m_nPosition = nPosition;
++    m_bTemporary = bTemporary;
++    m_xCurrentSettings->getByIndex( m_nPosition ) >>= m_aPropertyValues;
+ }
+ 
+ rtl::OUString& 
+@@ -411,12 +205,11 @@ ScVbaCommandBarPopup::getServiceNames()
+ }
+ 
+ //////////// ScVbaCommandBarButton //////////////////////////////
+-ScVbaCommandBarButton::ScVbaCommandBarButton( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition ) throw (uno::RuntimeException) : CommandBarButton_BASE( xParent, xContext, sName, nPosition, office::MsoControlType::msoControlButton )
+-{
+-}
+-
+-ScVbaCommandBarButton::ScVbaCommandBarButton( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (uno::RuntimeException) : CommandBarButton_BASE( xParent, xContext, sName, nPosition, bTemporary, office::MsoControlType::msoControlButton) 
++ScVbaCommandBarButton::ScVbaCommandBarButton( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xSettings, VbaCommandBarHelperRef pHelper, const css::uno::Reference< css::container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException) : CommandBarButton_BASE( xParent, xContext, xSettings, pHelper, xBarSettings, sResourceUrl )
+ {
++    m_nPosition = nPosition;
++    m_bTemporary = bTemporary;
++    m_xCurrentSettings->getByIndex( m_nPosition ) >>= m_aPropertyValues;
+ }
+ 
+ rtl::OUString& 
+diff --git vbahelper/source/vbahelper/vbacommandbarcontrol.hxx vbahelper/source/vbahelper/vbacommandbarcontrol.hxx
+index c1a8b07..f40ad82 100644
+--- vbahelper/source/vbahelper/vbacommandbarcontrol.hxx
++++ vbahelper/source/vbahelper/vbacommandbarcontrol.hxx
+@@ -39,44 +39,30 @@
+ #include <ooo/vba/XCommandBarPopup.hpp>
+ #include <ooo/vba/XCommandBarButton.hpp>
+ #include <ooo/vba/office/MsoControlType.hpp>
+-
+ #include <vbahelper/vbahelperinterface.hxx>
+-#include "vbacommandbarcontrols.hxx"
++#include "vbacommandbarhelper.hxx"
++#include <cppuhelper/implbase1.hxx>
+ 
+ typedef InheritedHelperInterfaceImpl1< ov::XCommandBarControl > CommandBarControl_BASE;
+ 
+ class ScVbaCommandBarControl : public CommandBarControl_BASE
+ {
+-private:
+-    rtl::OUString       m_sName;
+-    rtl::OUString       m_sBarName;
+-    rtl::OUString       m_sCommand;
++protected:
++    VbaCommandBarHelperRef pCBarHelper;
++    rtl::OUString       m_sResourceUrl;
++    css::uno::Reference< css::container::XIndexAccess >          m_xCurrentSettings;
++    css::uno::Reference< css::container::XIndexAccess >          m_xBarSettings;
++    css::uno::Sequence< css::beans::PropertyValue >              m_aPropertyValues;
++
+     sal_Int32           m_nPosition;
+     sal_Bool            m_bTemporary;
+-    sal_Int32           m_nType;
+-    sal_Bool            m_bIsMenu;
+-    ScVbaCommandBarControls*        m_pCommandBarControls;
+-    css::uno::Reference< ov::XHelperInterface >               m_xParentHardRef;
+-    css::uno::Reference< css::ui::XUIConfigurationManager >         m_xUICfgManager;
+-    css::uno::Reference< css::ui::XUIConfigurationPersistence >     m_xUICfgPers;
+-    css::uno::Reference< css::container::XIndexContainer >          m_xBarSettings;
+-    css::uno::Reference< css::container::XIndexContainer >          m_xCurrentSettings;
+-    css::beans::PropertyValues                                      m_aPropertyValues;
+-    
+-    void initObjects() throw (css::uno::RuntimeException);
+-    void createNewMenuBarControl();
+-    void createNewToolBarControl();
++
++private:
++    void ApplyChange() throw (css::uno::RuntimeException);
++
+ public:
+-    ScVbaCommandBarControl( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition = 0, sal_Int32 nType = ov::office::MsoControlType::msoControlButton ) throw (css::uno::RuntimeException);
+-    ScVbaCommandBarControl( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary, sal_Int32 nType = ov::office::MsoControlType::msoControlButton ) throw (css::uno::RuntimeException);
+-    css::uno::Reference< css::ui::XUIConfigurationManager > GetUICfgManager() { return m_xUICfgManager; };
+-    css::uno::Reference< css::ui::XUIConfigurationPersistence > GetUICfgPers() { return m_xUICfgPers; };
+-    css::uno::Reference< css::container::XIndexContainer >  GetBarSettings() { return m_xBarSettings; };
+-    sal_Bool IsMenu() { return m_bIsMenu; };
+-    sal_Int32 GetPosition() { return m_nPosition; };
+-    css::uno::Reference< css::container::XIndexContainer > GetCurrentSettings() { return m_xCurrentSettings; };
+-    css::beans::PropertyValues GetPropertyValues() { return m_aPropertyValues; };
+-    void SetPropertyValues( css::beans::PropertyValues aPropertyValues ) { m_aPropertyValues = aPropertyValues; };
++    ScVbaCommandBarControl( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xSettings, VbaCommandBarHelperRef pHelper, const css::uno::Reference< css::container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl ) throw (css::uno::RuntimeException);
++    ScVbaCommandBarControl( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xSettings, VbaCommandBarHelperRef pHelper, const css::uno::Reference< css::container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException);
+     
+     // Attributes
+     virtual ::rtl::OUString SAL_CALL getCaption() throw (css::uno::RuntimeException);
+@@ -85,6 +71,10 @@ public:
+     virtual void SAL_CALL setOnAction( const ::rtl::OUString& _onaction ) throw (css::uno::RuntimeException);
+     virtual ::sal_Bool SAL_CALL getVisible() throw (css::uno::RuntimeException);
+     virtual void SAL_CALL setVisible( ::sal_Bool _visible ) throw (css::uno::RuntimeException);
++    virtual sal_Int32 SAL_CALL getType() throw (css::uno::RuntimeException)
++    {
++        return ov::office::MsoControlType::msoControlButton;
++    }
+ 
+     // Methods
+     virtual void SAL_CALL Delete(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+@@ -99,8 +89,12 @@ typedef cppu::ImplInheritanceHelper1< ScVbaCommandBarControl, ov::XCommandBarPop
+ class ScVbaCommandBarPopup : public CommandBarPopup_BASE
+ {
+ public:
+-    ScVbaCommandBarPopup( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition = 0 ) throw (css::uno::RuntimeException);
+-    ScVbaCommandBarPopup( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException);
++    ScVbaCommandBarPopup( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xSettings, VbaCommandBarHelperRef pHelper, const css::uno::Reference< css::container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException);
++
++    virtual sal_Int32 SAL_CALL getType() throw (css::uno::RuntimeException)
++    {
++        return ov::office::MsoControlType::msoControlPopup;
++    }
+ 	// XHelperInterface
+ 	virtual rtl::OUString& getServiceImplName();
+ 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
+@@ -110,8 +104,12 @@ typedef cppu::ImplInheritanceHelper1< ScVbaCommandBarControl, ov::XCommandBarBut
+ class ScVbaCommandBarButton : public CommandBarButton_BASE
+ {
+ public:
+-    ScVbaCommandBarButton( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition = 0 ) throw (css::uno::RuntimeException);
+-    ScVbaCommandBarButton( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException);
++    ScVbaCommandBarButton( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xSettings, VbaCommandBarHelperRef pHelper, const css::uno::Reference< css::container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException);
++
++    virtual sal_Int32 SAL_CALL getType() throw (css::uno::RuntimeException)
++    {
++        return ov::office::MsoControlType::msoControlButton;
++    }
+ 	// XHelperInterface
+ 	virtual rtl::OUString& getServiceImplName();
+ 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
+diff --git vbahelper/source/vbahelper/vbacommandbarcontrols.cxx vbahelper/source/vbahelper/vbacommandbarcontrols.cxx
+index c6adbc2..ea56a09 100644
+--- vbahelper/source/vbahelper/vbacommandbarcontrols.cxx
++++ vbahelper/source/vbahelper/vbacommandbarcontrols.cxx
+@@ -38,8 +38,6 @@
+ using namespace com::sun::star;
+ using namespace ooo::vba;
+ 
+-uno::Any lcl_getPropertyValue( beans::PropertyValues aPropertyValues, rtl::OUString sPropertyName );
+-
+ typedef ::cppu::WeakImplHelper1< container::XEnumeration > CommandBarControlEnumeration_BASE;
+ class CommandBarControlEnumeration : public CommandBarControlEnumeration_BASE
+ {
+@@ -58,272 +56,183 @@ public:
+     {
+         if( hasMoreElements() )
+         {
+-            rtl::OUString sName = m_pCommandBarControls->GetControlNameByIndex( m_nCurrentPosition );
+-            m_nCurrentPosition = m_nCurrentPosition + 1;
+-            if( sName.getLength() > 0 )
+-                return m_pCommandBarControls->createCollectionObject( uno::makeAny( sName ) );
+-            else
+-                return nextElement();
++            return m_pCommandBarControls->createCollectionObject( uno::makeAny( m_nCurrentPosition++ ) );
+         }
+         else
+             throw container::NoSuchElementException();
+     }
+ };
+ 
+-ScVbaCommandBarControls::ScVbaCommandBarControls( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< container::XIndexAccess> xIndexAccess, const uno::Reference< frame::XModel >& xModel ) throw (uno::RuntimeException) : CommandBarControls_BASE( xParent, xContext, xIndexAccess ), m_xModel( xModel )
++ScVbaCommandBarControls::ScVbaCommandBarControls( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< container::XIndexAccess>& xIndexAccess, VbaCommandBarHelperRef pHelper, const uno::Reference< container::XIndexAccess>& xBarSettings, const rtl::OUString& sResourceUrl ) throw (uno::RuntimeException) : CommandBarControls_BASE( xParent, xContext, xIndexAccess ), pCBarHelper( pHelper ), m_xBarSettings( xBarSettings ), m_sResourceUrl( sResourceUrl )
+ {
+-    m_bIsMenu = sal_False;
+-    m_bHasElements = sal_False;
+-    m_xParentHardRef.set( xParent, uno::UNO_QUERY_THROW );
+-    m_pCommandBar = dynamic_cast< ScVbaCommandBar* >( m_xParentHardRef.get() );
+-    m_pCommandBarControl = dynamic_cast< ScVbaCommandBarControl* >( m_xParentHardRef.get() );
+-    if( m_pCommandBar )
+-    {
+-        m_xUICfgManager.set( m_pCommandBar->GetUICfgManager(), uno::UNO_QUERY_THROW );
+-        m_xUICfgPers.set( m_pCommandBar->GetUICfgPers(), uno::UNO_QUERY_THROW );
+-        m_xBarSettings.set( m_pCommandBar->GetBarSettings(), uno::UNO_QUERY_THROW );
+-        m_bIsMenu = m_pCommandBar->IsMenu();
+-        if( m_xBarSettings->hasElements() )
+-        {
+-            m_bHasElements = sal_True;
+-        }
+-    }
+-    else if( m_pCommandBarControl )
+-    {
+-        m_xUICfgManager.set( m_pCommandBarControl->GetUICfgManager(), uno::UNO_QUERY_THROW );
+-        m_xUICfgPers.set( m_pCommandBarControl->GetUICfgPers(), uno::UNO_QUERY_THROW );
+-        beans::PropertyValues aPropertyValues;
+-        m_pCommandBarControl->GetCurrentSettings()->getByIndex( m_pCommandBarControl->GetPosition() ) >>= aPropertyValues;
+-        m_pCommandBarControl->SetPropertyValues( aPropertyValues );
+-        m_xBarSettings.set( m_pCommandBarControl->GetCurrentSettings(), uno::UNO_QUERY_THROW );
+-
+-        uno::Any aValue = lcl_getPropertyValue( m_pCommandBarControl->GetPropertyValues(), rtl::OUString::createFromAscii("ItemDescriptorContainer") );
+-        if( aValue.hasValue() )
+-        {
+-            m_xCurrentSettings = m_pCommandBarControl->GetCurrentSettings();
+-            m_bHasElements = sal_True;
+-        }
+-        else
+-        {
+-            m_bHasElements = sal_False;
+-        }
+-        m_bIsMenu = m_pCommandBarControl->IsMenu();
+-    }
+-    else
+-    {
+-        throw uno::RuntimeException( rtl::OUString::createFromAscii("Parent needs to be a ScVbaCommandBar or a ScVbaCommandBarControl"), uno::Reference< uno::XInterface >() );
+-    }
++    m_bIsMenu = sResourceUrl.equalsAscii( ITEM_MENUBAR_URL ) ? sal_True : sal_False;
+ }
+-rtl::OUString
+-ScVbaCommandBarControls::GetControlNameByIndex( const sal_Int32 nIndex ) throw ( uno::RuntimeException )
++
++uno::Sequence< beans::PropertyValue > ScVbaCommandBarControls::CreateMenuItemData( const rtl::OUString& sCommandURL, const rtl::OUString& sHelpURL, const rtl::OUString& sLabel, sal_uInt16 nType, const uno::Any& aSubMenu )
+ {
+-    sal_Int32 nCount = 0;
+-    if( m_bHasElements )
+-    {
+-        sal_Int32 nBarSettingsCount = m_xBarSettings->getCount();
+-        for( sal_Int32 i = 0; i < nBarSettingsCount; i++ )
+-        {
+-            beans::PropertyValues aMenuValues;
+-            m_xBarSettings->getByIndex( i ) >>= aMenuValues;
+-            for( sal_Int32 j = 0; j < aMenuValues.getLength(); j++ )
+-            {
+-                if( aMenuValues[j].Name.equalsIgnoreAsciiCase( rtl::OUString::createFromAscii( "CommandURL" ) ) )
+-                {
+-                    nCount++;
+-                    if( nIndex == nCount )
+-                    {
+-                        rtl::OUString sCommandURL;
+-                        aMenuValues[j].Value >>= sCommandURL;
+-                        sal_Int32 nLastIndex = sCommandURL.lastIndexOf( rtl::OUString::createFromAscii(":") );
+-                        if( ( nLastIndex != -1 ) && ( ( nLastIndex +1 ) < sCommandURL.getLength() ) )
+-                        {
+-                            sCommandURL = sCommandURL.copy( nLastIndex + 1 );
+-                            return sCommandURL;
+-                        }
+-                    }
+-                }
+-            }
+-        } 
+-    }
+-    else
+-        throw  uno::RuntimeException( rtl::OUString::createFromAscii( "Out of bound" ), uno::Reference< uno::XInterface >() );
+-    return rtl::OUString();
++    uno::Sequence< beans::PropertyValue > aProps(5);
++
++    aProps[0].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_COMMANDURL );
++    aProps[0].Value <<= sCommandURL;
++    aProps[1].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_HELPURL );
++    aProps[1].Value <<= sHelpURL;
++    aProps[2].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_LABEL );
++    aProps[2].Value <<= sLabel;
++    aProps[3].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_TYPE );
++    aProps[3].Value <<= nType;
++    aProps[4].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_CONTAINER );
++    aProps[4].Value = aSubMenu;
++
++    return aProps;
+ }
+ 
+-// Attributes
+-sal_Int32 SAL_CALL 
+-ScVbaCommandBarControls::getCount() throw (uno::RuntimeException)
++uno::Sequence< beans::PropertyValue > ScVbaCommandBarControls::CreateToolbarItemData( const rtl::OUString& sCommandURL, const rtl::OUString& sHelpURL, const rtl::OUString& sLabel, sal_uInt16 nType, const uno::Any& aSubMenu, sal_Bool isVisible, sal_Int32 nStyle )
+ {
+-    sal_Int32 nCount = 0;
+-    if( m_bHasElements )
+-    {
+-        sal_Int32 nBarSettingsCount = m_xBarSettings->getCount();
+-        for( sal_Int32 i = 0; i < nBarSettingsCount; i++ )
+-        {
+-            beans::PropertyValues aMenuValues;
+-            m_xBarSettings->getByIndex( i ) >>= aMenuValues;
+-            for( sal_Int32 j = 0; j < aMenuValues.getLength(); j++ )
+-            {
+-                if( aMenuValues[j].Name.equalsIgnoreAsciiCase( rtl::OUString::createFromAscii( "CommandURL" ) ) )
+-                {
+-                    nCount++;
+-                }
+-            }
+-        } 
+-    }
+-    return nCount;
++    uno::Sequence< beans::PropertyValue > aProps(7);
++
++    aProps[0].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_COMMANDURL );
++    aProps[0].Value <<= sCommandURL;
++    aProps[1].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_HELPURL );
++    aProps[1].Value <<= sHelpURL;
++    aProps[2].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_LABEL );
++    aProps[2].Value <<= sLabel;
++    aProps[3].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_TYPE );
++    aProps[3].Value <<= nType;
++    aProps[4].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_CONTAINER );
++    aProps[4].Value = aSubMenu;
++    aProps[5].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_ISVISIBLE );
++    aProps[5].Value <<= isVisible;
++    aProps[6].Name = rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_STYLE );
++    aProps[6].Value <<= nStyle;
++
++    return aProps;
+ }
++
+ // XEnumerationAccess
+ uno::Type SAL_CALL
+ ScVbaCommandBarControls::getElementType() throw ( uno::RuntimeException )
+ {
+-    return XCommandBarControls::static_type( 0 );
++    return XCommandBarControl::static_type( 0 );
+ }
++
+ uno::Reference< container::XEnumeration >
+ ScVbaCommandBarControls::createEnumeration() throw ( uno::RuntimeException )
+ {
+     return uno::Reference< container::XEnumeration >( new CommandBarControlEnumeration( this ) );
+ }
++
+ uno::Any
+ ScVbaCommandBarControls::createCollectionObject( const uno::Any& aSource )
+ {
+-    // only surport the aSource as a name string, because this class is a API wrapper
+-    rtl::OUString sName;
+-    if( aSource >>= sName )
+-    {
+-        uno::Reference< container::XIndexContainer > xCurrentSettings;
+-        beans::PropertyValues aPropertyValues;
+-        if( m_pCommandBarControl )
+-        {
+-            m_pCommandBarControl->GetCurrentSettings()->getByIndex( m_pCommandBarControl->GetPosition() ) >>= aPropertyValues;
+-            xCurrentSettings.set( lcl_getPropertyValue( aPropertyValues, rtl::OUString::createFromAscii( "ItemDescriptorContainer" ) ), uno::UNO_QUERY );
+-            if( !xCurrentSettings.is() )
+-            {
+-                xCurrentSettings.set( m_xUICfgManager->getSettings( GetParentToolBarName(), sal_True ), uno::UNO_QUERY );
+-            }
+-        }
+-
+-        sal_Int32 nPosition = -1;
+-        for( sal_Int32 i = 0; i < xCurrentSettings->getCount(); i++ )
+-        {
+-            xCurrentSettings->getByIndex( i ) >>= aPropertyValues;
+-            // Label always empty in OOo
+-            rtl::OUString sLabel;
+-            lcl_getPropertyValue( aPropertyValues, rtl::OUString::createFromAscii( "Label" ) ) >>= sLabel;
+-            if( sLabel.equalsIgnoreAsciiCase( sName ) )
+-            {
+-                nPosition = i;
+-                break;
+-            }
+-            // using CammandURL to find
+-            rtl::OUString sCommandURL;
+-            lcl_getPropertyValue( aPropertyValues, rtl::OUString::createFromAscii( "CommandURL" ) ) >>= sCommandURL;
+-            sal_Int32 nLastIndex = sCommandURL.lastIndexOf( rtl::OUString::createFromAscii(":") );
+-            if( ( nLastIndex != -1 ) && ( ( nLastIndex + 1 ) < sCommandURL.getLength() ) )
+-            {
+-                sCommandURL = sCommandURL.copy( nLastIndex + 1 );
+-            }
+-            if( sCommandURL.equalsIgnoreAsciiCase( sName ) )
+-            {
+-                nPosition = i;
+-                break;
+-            }
+-        }
+-
+-        if( nPosition  != -1 )
+-        {
+-            uno::Reference< container::XIndexContainer > xSubMenu;
+-            lcl_getPropertyValue( aPropertyValues, rtl::OUString::createFromAscii( "ItemDescriptorContainer" ) ) >>= xSubMenu;
+-            ScVbaCommandBarControl* pNewCommandBarControl = NULL;
+-            if( xSubMenu.is() )
+-                pNewCommandBarControl = new ScVbaCommandBarPopup( this, mxContext, sName, nPosition );
+-            else
+-                pNewCommandBarControl = new ScVbaCommandBarButton( this, mxContext, sName, nPosition );
++    sal_Int32 nPosition = -1;
++    aSource >>= nPosition;
++    uno::Sequence< beans::PropertyValue > aProps;
++    m_xIndexAccess->getByIndex( nPosition ) >>= aProps;
++    uno::Reference< container::XIndexAccess > xSubMenu;
++    getPropertyValue( aProps, rtl::OUString::createFromAscii( ITEM_DESCRIPTOR_CONTAINER ) ) >>= xSubMenu;
++    ScVbaCommandBarControl* pNewCommandBarControl = NULL;
++    if( xSubMenu.is() )
++        pNewCommandBarControl = new ScVbaCommandBarPopup( this, mxContext, m_xIndexAccess, pCBarHelper, m_xBarSettings, m_sResourceUrl, nPosition, sal_True );
++    else
++        pNewCommandBarControl = new ScVbaCommandBarButton( this, mxContext, m_xIndexAccess, pCBarHelper, m_xBarSettings, m_sResourceUrl, nPosition, sal_True );
+ 
+-            return uno::makeAny( uno::Reference< XCommandBarControl > ( pNewCommandBarControl ) );
+-        }
+-        else
+-            throw uno::RuntimeException( rtl::OUString::createFromAscii("The CommandBarControl do not exist"), uno::Reference< uno::XInterface >() );
+-        
+-    }
+-    return uno::Any();
++    return uno::makeAny( uno::Reference< XCommandBarControl > ( pNewCommandBarControl ) );
+ }
+ 
+ // Methods
+ uno::Any SAL_CALL 
+ ScVbaCommandBarControls::Item( const uno::Any& aIndex, const uno::Any& /*aIndex*/ ) throw (uno::RuntimeException)
+ {
++    sal_Int32 nPosition = -1;
+     if( aIndex.getValueTypeClass() == uno::TypeClass_STRING )
+     {
+-        return createCollectionObject( aIndex );
++        rtl::OUString sName;
++        aIndex >>= sName;
++        nPosition = VbaCommandBarHelper::findControlByName( m_xIndexAccess, sName );
+     } 
+-    sal_Int32 nIndex = 0;
+-    if( aIndex >>= nIndex )
++    else
++    {
++        aIndex >>= nPosition;
++    }
++
++    if( nPosition < 0 || nPosition >= getCount() )
+     {
+-        return createCollectionObject( uno::makeAny( GetControlNameByIndex( nIndex ) ) );
++        throw uno::RuntimeException();
+     }
+     
+-    return uno::Any();
++    return createCollectionObject( uno::makeAny( nPosition ) ); 
+ }
++
+ uno::Reference< XCommandBarControl > SAL_CALL 
+-ScVbaCommandBarControls::Add( const uno::Any& Type, const uno::Any& Id, const uno::Any& /*Parameter*/, const uno::Any& Before, const uno::Any& Temporary ) throw (script::BasicErrorException, uno::RuntimeException)
++ScVbaCommandBarControls::Add( const uno::Any& Type, const uno::Any& Id, const uno::Any& Parameter, const uno::Any& Before, const uno::Any& Temporary ) throw (script::BasicErrorException, uno::RuntimeException)
+ {
+     // Parameter is not supported
+     // the following name needs to be individually created;
+-    rtl::OUString sCaption( rtl::OUString::createFromAscii("custom Control") );
+-    rtl::OUString sCommand( rtl::OUString::createFromAscii("macro:///Standard.Module1.Test()") );
+-    sal_Int32 nType =0;
++    rtl::OUString sLabel( rtl::OUString::createFromAscii("Custom") );
++    rtl::OUString sCommandUrl = rtl::OUString::createFromAscii( CUSTOM_MENU_STR ) + sLabel;
++    sal_Int32 nType = office::MsoControlType::msoControlButton;
+     sal_Int32 nPosition = 0;
+-    sal_Int32 nId;
+     sal_Bool bTemporary = sal_True;
+     
+     if( Type.hasValue() )
+-        if( Type >>= nType )
+-        {
+-            // evalute the type of the new control
+-        }
+-    if( Id.hasValue() )
+-        if( Id >>= nId )
+-        {
+-            // evalute the action of the new control
+-        }
++    {
++        Type >>= nType;
++    }
++
++    if( nType != office::MsoControlType::msoControlButton &&
++        nType != office::MsoControlType::msoControlPopup )
++        throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Not implemented") ), uno::Reference< uno::XInterface >() );
++
++    if( Id.hasValue() || Parameter.hasValue( ) )
++    {
++        throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Not implemented") ), uno::Reference< uno::XInterface >() );
++    }
++
+     if( Before.hasValue() )
+         Before >>= nPosition;
+     else
+-    {
+-        // if Before is ignore, the new control should be placed at the end of the commandbars;
+-        if( m_pCommandBar )
+-            nPosition = getCount();
+-        else if ( m_pCommandBarControl )
+-        {
+-            css::uno::Reference< css::container::XIndexContainer > xCurrentSettings;
+-            xCurrentSettings.set( lcl_getPropertyValue( m_pCommandBarControl->GetPropertyValues(), rtl::OUString::createFromAscii("ItemDescriptorContainer") ), uno::UNO_QUERY );
+-            if( xCurrentSettings.is() )
+-            {
+-                nPosition = xCurrentSettings->getCount();
+-            }
+-        }
+-    }
++        nPosition = m_xIndexAccess->getCount();
++
+     if( Temporary.hasValue() )
+-        if( Temporary >>= bTemporary )
+-        {
+-            // evalute the temporary of the new Control
+-        }
++        Temporary >>= bTemporary;
+     
+-    ScVbaCommandBarControl* pNewCommandBarControl = NULL;
+-    if( nType == office::MsoControlType::msoControlButton )
++    uno::Any aSubMenu;
++    if( nType == office::MsoControlType::msoControlPopup )
+     {
+-        pNewCommandBarControl = new ScVbaCommandBarButton( this, mxContext, sCaption, nPosition, bTemporary );
++        // it is a Popmenu
++        uno::Reference< lang::XSingleComponentFactory > xSCF( m_xBarSettings, uno::UNO_QUERY_THROW );
++        aSubMenu <<= xSCF->createInstanceWithContext( mxContext );
+     }
+-    else if ( nType == office::MsoControlType::msoControlPopup )
++
++    // create control 
++    uno::Sequence< beans::PropertyValue > aProps;
++    rtl::OUString sHelpUrl;
++    sal_Int32 nItemType = 0;
++    if( IsMenu() )
+     {
+-        pNewCommandBarControl = new ScVbaCommandBarPopup( this, mxContext, sCaption, nPosition, bTemporary );
++        aProps = CreateMenuItemData( sCommandUrl, sHelpUrl, sLabel, nItemType, aSubMenu );
+     }
+     else
+     {
+-        pNewCommandBarControl = new ScVbaCommandBarControl( this, mxContext, sCaption, nPosition, bTemporary );
++        sal_Bool isVisible = sal_True;
++        sal_Int32 nStyle = 0;
++        aProps = CreateToolbarItemData( sCommandUrl, sHelpUrl, sLabel, nItemType, aSubMenu, isVisible, nStyle );
+     }
+ 
++
++    uno::Reference< container::XIndexContainer > xIndexContainer( m_xIndexAccess, uno::UNO_QUERY_THROW );
++    xIndexContainer->insertByIndex( nPosition, uno::makeAny( aProps ) );
++
++    pCBarHelper->getAppCfgManager()->replaceSettings( m_sResourceUrl, m_xBarSettings );
++    if( !bTemporary )
++        pCBarHelper->persistChanges();
++
++    ScVbaCommandBarControl* pNewCommandBarControl = NULL;
++    if( nType == office::MsoControlType::msoControlPopup )
++        pNewCommandBarControl = new ScVbaCommandBarPopup( this, mxContext, m_xIndexAccess, pCBarHelper, m_xBarSettings, m_sResourceUrl, nPosition, bTemporary );
++    else
++        pNewCommandBarControl = new ScVbaCommandBarButton( this, mxContext, m_xIndexAccess, pCBarHelper, m_xBarSettings, m_sResourceUrl, nPosition, bTemporary );
++
+     return uno::Reference< XCommandBarControl >( pNewCommandBarControl );
+ }
+    
+diff --git vbahelper/source/vbahelper/vbacommandbarcontrols.hxx vbahelper/source/vbahelper/vbacommandbarcontrols.hxx
+index f9ebe25..fa37f10 100644
+--- vbahelper/source/vbahelper/vbacommandbarcontrols.hxx
++++ vbahelper/source/vbahelper/vbacommandbarcontrols.hxx
+@@ -36,47 +36,27 @@
+ #define SC_VBA_COMMANDBARCONTROLS_HXX
+ 
+ #include <ooo/vba/XCommandBarControls.hpp>
+-
+ #include <vbahelper/vbahelperinterface.hxx>
+-#include "vbacommandbar.hxx"
+ #include <vbahelper/vbacollectionimpl.hxx>
+-
+-class ScVbaCommandBarControl;
++#include "vbacommandbarhelper.hxx"
+ 
+ typedef CollTestImplHelper< ov::XCommandBarControls > CommandBarControls_BASE;
+ 
+ class ScVbaCommandBarControls : public CommandBarControls_BASE
+ {
+ private:
+-    sal_Bool                    m_bIsMenu;
+-    sal_Bool                    m_bHasElements;
+-    ScVbaCommandBar*            m_pCommandBar; 
+-    ScVbaCommandBarControl*     m_pCommandBarControl; 
+-    css::uno::Reference< ov::XHelperInterface >               m_xParentHardRef;
+-    css::uno::Reference< css::ui::XUIConfigurationManager >         m_xUICfgManager;
+-    css::uno::Reference< css::ui::XUIConfigurationPersistence >     m_xUICfgPers;
+-    css::uno::Reference< css::container::XIndexContainer >          m_xBarSettings;
+-    css::uno::Reference< css::container::XIndexContainer >          m_xCurrentSettings;
+-    css::uno::Reference< css::frame::XModel >          m_xModel;
++    VbaCommandBarHelperRef pCBarHelper;
++    css::uno::Reference< css::container::XIndexAccess >          m_xBarSettings;
++    rtl::OUString       m_sResourceUrl;
++    sal_Bool m_bIsMenu;
++
++    css::uno::Sequence< css::beans::PropertyValue > CreateMenuItemData( const rtl::OUString& sCommandURL, const rtl::OUString& sHelpURL, const rtl::OUString& sLabel, sal_uInt16 nType, const css::uno::Any& aSubMenu );
++    css::uno::Sequence< css::beans::PropertyValue > CreateToolbarItemData( const rtl::OUString& sCommandURL, const rtl::OUString& sHelpURL, const rtl::OUString& sLabel, sal_uInt16 nType, const css::uno::Any& aSubMenu, sal_Bool isVisible, sal_Int32 nStyle );
+ 
+ public:
+-    ScVbaCommandBarControls( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::container::XIndexAccess > xIndexAccess, const  css::uno::Reference< css::frame::XModel >& xModel ) throw( css::uno::RuntimeException );
+-    css::uno::Reference< css::ui::XUIConfigurationManager > GetUICfgManager() { return m_xUICfgManager; };
+-    css::uno::Reference< css::ui::XUIConfigurationPersistence > GetUICfgPers() { return m_xUICfgPers; };
+-    css::uno::Reference< css::container::XIndexContainer >  GetBarSettings() { return m_xBarSettings; };
+-    sal_Bool IsMenu() { return m_bIsMenu; };
+-    ScVbaCommandBar* GetParentCommandBar() { return m_pCommandBar; };
+-    ScVbaCommandBarControl* GetParentCommandBarControl() { return m_pCommandBarControl; };
+-    rtl::OUString GetParentToolBarName() 
+-    { 
+-        if( m_pCommandBar ) return m_pCommandBar->GetToolBarName();
+-        else return rtl::OUString();
+-    }
+-    rtl::OUString GetControlNameByIndex( const sal_Int32 nIndex ) throw ( css::uno::RuntimeException );
++    ScVbaCommandBarControls( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess, VbaCommandBarHelperRef pHelper, const css::uno::Reference< css::container::XIndexAccess >& xBarSettings, const rtl::OUString& sResourceUrl ) throw( css::uno::RuntimeException );
++    sal_Bool IsMenu(){ return m_bIsMenu; }
+ 
+-    css::uno::Reference< css::frame::XModel > GetModel() { return m_xModel; }
+-    // Attributes
+-    virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
+     // XEnumerationAccess
+     virtual css::uno::Type SAL_CALL getElementType() throw (css::uno::RuntimeException);
+     virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException);
+diff --git vbahelper/source/vbahelper/vbacommandbarhelper.cxx vbahelper/source/vbahelper/vbacommandbarhelper.cxx
+new file mode 100644
+index 0000000..7c59107
+--- /dev/null
++++ vbahelper/source/vbahelper/vbacommandbarhelper.cxx
+@@ -0,0 +1,175 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++#include "vbacommandbarhelper.hxx" 
++#include <com/sun/star/ui/XUIConfigurationManagerSupplier.hpp>
++#include <com/sun/star/ui/XUIConfigurationStorage.hpp>
++#include <com/sun/star/ui/XModuleUIConfigurationManager.hpp>
++#include <com/sun/star/ui/XUIConfigurationPersistence.hpp>
++#include <com/sun/star/ui/XUIElement.hpp>
++#ifndef _COM_SUN_STAR_UI_UIElementType_HPP_
++#include <com/sun/star/ui/UIElementType.hpp>
++#endif
++#include <comphelper/processfactory.hxx>
++#include <vbahelper/vbahelper.hxx>
++#include <time.h>
++
++using namespace com::sun::star;
++using namespace ooo::vba;
++
++
++VbaCommandBarHelper::VbaCommandBarHelper( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::frame::XModel >& xModel ) throw (css::uno::RuntimeException) : mxContext( xContext ), mxModel( xModel )
++{
++    Init();
++}
++
++void VbaCommandBarHelper::Init( ) throw (css::uno::RuntimeException)
++{
++    uno::Reference< css::ui::XUIConfigurationManagerSupplier > xUICfgSupplier( mxModel, uno::UNO_QUERY_THROW );
++    m_xDocCfgMgr = xUICfgSupplier->getUIConfigurationManager();
++
++    uno::Reference< lang::XServiceInfo > xServiceInfo( mxModel, uno::UNO_QUERY_THROW );
++    if( xServiceInfo->supportsService( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.sheet.SpreadsheetDocument") ) ) )
++    {
++        maModuleId = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.sheet.SpreadsheetDocument") );
++    }
++    else if( xServiceInfo->supportsService( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.text.TextDocument" ) ) ) )
++    {
++        maModuleId = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.text.TextDocument") );
++    }
++
++    if( maModuleId.getLength() == 0 )
++    {
++        throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Not implemented") ), uno::Reference< uno::XInterface >() );
++    }
++
++	uno::Reference< lang::XMultiServiceFactory > xServiceManager( mxContext->getServiceManager(), uno::UNO_QUERY_THROW );
++        
++	css::uno::Reference< css::ui::XModuleUIConfigurationManagerSupplier > xUICfgMgrSupp( xServiceManager->createInstance( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.ui.ModuleUIConfigurationManagerSupplier" ))), uno::UNO_QUERY_THROW );
++
++    m_xAppCfgMgr.set( xUICfgMgrSupp->getUIConfigurationManager( maModuleId ), uno::UNO_QUERY_THROW );
++
++	css::uno::Reference< css::container::XNameAccess > xNameAccess( xServiceManager->createInstance( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.ui.WindowStateConfiguration" ))), uno::UNO_QUERY_THROW );
++
++    m_xWindowState.set( xNameAccess->getByName( maModuleId ), uno::UNO_QUERY_THROW );
++}
++
++css::uno::Reference< css::container::XIndexAccess > VbaCommandBarHelper::getMenuBarSettings() throw (css::uno::RuntimeException)
++{
++    return m_xAppCfgMgr->getSettings( getMenuBarUrl(), sal_True );
++}
++
++sal_Bool VbaCommandBarHelper::persistChanges() throw (css::uno::RuntimeException)
++{
++    uno::Reference< css::ui::XUIConfigurationPersistence > xConfigPersistence( m_xAppCfgMgr, uno::UNO_QUERY_THROW );
++    sal_Bool result = sal_False;
++    if( xConfigPersistence->isModified() )
++    {
++        xConfigPersistence->store();
++        result = sal_True;
++    }
++    return result;
++}
++
++rtl::OUString VbaCommandBarHelper::getMenuBarUrl()
++{
++    static const rtl::OUString sMenuBarUrl( RTL_CONSTASCII_USTRINGPARAM( ITEM_MENUBAR_URL ) );
++    return sMenuBarUrl;
++}
++
++// return the resource url if found
++rtl::OUString VbaCommandBarHelper::findToolbarByName( const css::uno::Reference< css::container::XNameAccess >& xNameAccess, const rtl::OUString& sName ) throw (css::uno::RuntimeException)
++{
++    rtl::OUString sUIName;
++    rtl::OUString sResourceUrl;
++    uno::Sequence< ::rtl::OUString > allNames = xNameAccess->getElementNames();
++    for( sal_Int32 i = 0; i < allNames.getLength(); i++ )
++    {
++        sResourceUrl = allNames[i];
++        if(sResourceUrl.indexOf( rtl::OUString::createFromAscii( ITEM_TOOLBAR_URL ) ) == 0 )
++        {
++            //OSL_TRACE("VbaCommandBarHelper::findToolbarByName, toolbar resource url: %s", rtl::OUStringToOString( sResourceUrl, RTL_TEXTENCODING_UTF8 ).getStr() );
++            if( m_xAppCfgMgr->hasSettings( sResourceUrl ) )
++            {
++                uno::Reference< beans::XPropertySet > xPropertySet( m_xAppCfgMgr->getSettings( sResourceUrl, sal_False ), uno::UNO_QUERY_THROW );
++                xPropertySet->getPropertyValue( rtl::OUString::createFromAscii(ITEM_DESCRIPTOR_UINAME) ) >>= sUIName;
++              //  OSL_TRACE("VbaCommandBarHelper::findToolbarByName, toolbar ui name: %s", rtl::OUStringToOString( sUIName, RTL_TEXTENCODING_UTF8 ).getStr() );
++                if( sName.equalsIgnoreAsciiCase( sUIName ) )
++                    return sResourceUrl;
++            }
++        }
++    }
++    return rtl::OUString();
++}
++
++// if found, return the position of the control. if not found, return -1
++sal_Int32 VbaCommandBarHelper::findControlByName( const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess, const rtl::OUString& sName ) throw (css::uno::RuntimeException)
++{
++    sal_Int32 nCount = xIndexAccess->getCount();
++    css::uno::Sequence< css::beans::PropertyValue > aProps;
++    for( sal_Int32 i = 0; i < nCount; i++ )
++    {
++        rtl::OUString sLabel;
++        xIndexAccess->getByIndex( i ) >>= aProps;
++        getPropertyValue( aProps, rtl::OUString::createFromAscii(ITEM_DESCRIPTOR_LABEL) ) >>= sLabel;
++        // handle the hotkey character '~'
++        rtl::OUString sNewLabel;
++        sal_Int32 index = sLabel.indexOf( sal_Unicode('~') );
++        if( index < 0 )
++            sNewLabel = sLabel;
++        else if( index == 0 )
++            sNewLabel = sLabel.copy( index + 1);
++        else if( index == sNewLabel.getLength() - 1 )
++            sNewLabel = sLabel.copy(0, index );
++        else
++            sNewLabel = sLabel.copy( 0, index ) + sLabel.copy( index + 1 ); 
++        OSL_TRACE("VbaCommandBarHelper::findControlByName, control name: %s", rtl::OUStringToOString( sNewLabel, RTL_TEXTENCODING_UTF8 ).getStr() );
++        if( sName.equalsIgnoreAsciiCase( sNewLabel ) )
++            return i;
++    }
++
++    // not found
++    return -1;
++}
++
++rtl::OUString VbaCommandBarHelper::generateCustomURL()
++{
++    rtl::OUString url = rtl::OUString::createFromAscii( ITEM_TOOLBAR_URL );
++    url += rtl::OUString::createFromAscii( CUSTOM_TOOLBAR_STR );
++
++    // use a random number to minimize possible clash with existing custom toolbars
++    srand( unsigned( time( NULL ) ));
++    url += rtl::OUString::valueOf( sal_Int64( rand() ), 16 );
++    return url;
++}
+diff --git vbahelper/source/vbahelper/vbacommandbarhelper.hxx vbahelper/source/vbahelper/vbacommandbarhelper.hxx
+new file mode 100644
+index 0000000..a6304bc
+--- /dev/null
++++ vbahelper/source/vbahelper/vbacommandbarhelper.hxx
+@@ -0,0 +1,105 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++#ifndef VBA_COMMANDBARHELPER_HXX
++#define VBA_COMMANDBARHELPER_HXX
++
++#include <vbahelper/vbahelperinterface.hxx>
++#include <com/sun/star/frame/XModel.hpp>
++#include <com/sun/star/uno/XComponentContext.hpp>
++#include <com/sun/star/ui/XUIConfigurationManager.hpp>
++#include <com/sun/star/ui/XModuleUIConfigurationManagerSupplier.hpp>
++#include <com/sun/star/container/XIndexAccess.hpp>
++#include <com/sun/star/container/XNameAccess.hpp>
++#include <boost/shared_ptr.hpp>
++
++
++static const char ITEM_DESCRIPTOR_COMMANDURL[]  = "CommandURL";
++static const char ITEM_DESCRIPTOR_HELPURL[]     = "HelpURL";
++static const char ITEM_DESCRIPTOR_CONTAINER[]   = "ItemDescriptorContainer";
++static const char ITEM_DESCRIPTOR_LABEL[]       = "Label";
++static const char ITEM_DESCRIPTOR_TYPE[]        = "Type";
++static const char ITEM_DESCRIPTOR_STYLE[]       = "Style";
++static const char ITEM_DESCRIPTOR_ISVISIBLE[]   = "IsVisible";
++static const char ITEM_DESCRIPTOR_RESOURCEURL[] = "ResourceURL";
++static const char ITEM_DESCRIPTOR_UINAME[]		= "UIName";
++
++static const char ITEM_MENUBAR_URL[] = "private:resource/menubar/menubar";
++static const char ITEM_TOOLBAR_URL[] = "private:resource/toolbar/";
++
++static const char CUSTOM_TOOLBAR_STR[] = "custom_toolbar_";
++static const char CUSTOM_MENU_STR[] = "vnd.openoffice.org:CustomMenu";
++
++class VbaCommandBarHelper;
++typedef ::boost::shared_ptr< VbaCommandBarHelper > VbaCommandBarHelperRef;
++
++class VbaCommandBarHelper
++{
++private:
++    css::uno::Reference< css::uno::XComponentContext > mxContext;
++    css::uno::Reference< css::frame::XModel > mxModel;
++    css::uno::Reference< css::ui::XUIConfigurationManager > m_xDocCfgMgr; // current document
++    css::uno::Reference< css::ui::XUIConfigurationManager > m_xAppCfgMgr;
++    css::uno::Reference< css::container::XNameAccess > m_xWindowState;
++    rtl::OUString maModuleId;
++
++    void Init() throw (css::uno::RuntimeException);
++public:
++    VbaCommandBarHelper( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::frame::XModel >& xModel ) throw( css::uno::RuntimeException );
++
++    css::uno::Reference< css::frame::XModel > getModel() { return mxModel; }
++
++    css::uno::Reference< css::ui::XUIConfigurationManager > getDocCfgManager() throw (css::uno::RuntimeException)
++    {
++        return m_xDocCfgMgr;
++    }
++    css::uno::Reference< css::ui::XUIConfigurationManager > getAppCfgManager() throw (css::uno::RuntimeException)
++    {
++        return m_xAppCfgMgr;
++    }
++    css::uno::Reference< css::container::XIndexAccess > getMenuBarSettings() throw (css::uno::RuntimeException);
++    css::uno::Reference< css::container::XNameAccess > getPersistentWindowState() throw (css::uno::RuntimeException)
++    {
++        return m_xWindowState;
++    }
++    sal_Bool persistChanges() throw (css::uno::RuntimeException);
++
++    const rtl::OUString getModuleId(){ return maModuleId; }
++    static rtl::OUString getMenuBarUrl();
++    rtl::OUString findToolbarByName( const css::uno::Reference< css::container::XNameAccess >& xNameAccess, const rtl::OUString& sName ) throw (css::uno::RuntimeException);
++    static sal_Int32 findControlByName( const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess, const rtl::OUString& sName ) throw (css::uno::RuntimeException);
++    static rtl::OUString generateCustomURL();
++};
++
++#endif//VBA_COMMANDBARHELPER_HXX
+diff --git vbahelper/source/vbahelper/vbacommandbars.cxx vbahelper/source/vbahelper/vbacommandbars.cxx
+index 3aae99b..0f7881e 100644
+--- vbahelper/source/vbahelper/vbacommandbars.cxx
++++ vbahelper/source/vbahelper/vbacommandbars.cxx
+@@ -35,6 +35,10 @@
+ #include <com/sun/star/lang/XServiceInfo.hpp>
+ #include <com/sun/star/frame/XDesktop.hpp>
+ #include <com/sun/star/container/XNameAccess.hpp>
++#include <com/sun/star/ui/XUIConfigurationManagerSupplier.hpp>
++#include <com/sun/star/ui/XUIConfigurationStorage.hpp>
++#include <com/sun/star/ui/XModuleUIConfigurationManager.hpp>
++#include <com/sun/star/ui/XUIConfigurationPersistence.hpp>
+ 
+ #include "vbacommandbars.hxx"
+ #include "vbacommandbar.hxx"
+@@ -42,22 +46,21 @@
+ using namespace com::sun::star;
+ using namespace ooo::vba;
+ 
+-typedef ::cppu::WeakImplHelper1< container::XEnumeration > CommandBarEnumeration_BASE;
+ 
+-static rtl::OUString sSpreadsheetDocumentUrl( rtl::OUString::createFromAscii( "com.sun.star.sheet.SpreadsheetDocument" ) );
+-static rtl::OUString sTextDocumentUrl( rtl::OUString::createFromAscii( "com.sun.star.text.TextDocument" ) );
+-static rtl::OUString sWindowStateConfUrl( rtl::OUString::createFromAscii( "com.sun.star.ui.WindowStateConfiguration" ) );
++typedef ::cppu::WeakImplHelper1< container::XEnumeration > CommandBarEnumeration_BASE;
+ 
+ class CommandBarEnumeration : public CommandBarEnumeration_BASE
+ {
++    uno::Reference< XHelperInterface > m_xParent;
+     uno::Reference< uno::XComponentContext > m_xContext;
+-    uno::Reference< XCommandBars > m_xCommandBars;
++    VbaCommandBarHelperRef pCBarHelper;
+     uno::Sequence< rtl::OUString > m_sNames;
+     sal_Int32 m_nCurrentPosition;
+-    uno::Reference< frame::XModel > m_xModel;
+ public:
+-    CommandBarEnumeration( const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< XCommandBars > xCommandBars, const uno::Sequence< rtl::OUString > sNames, const uno::Reference< frame::XModel >& xModel ) : m_xContext( xContext ), m_xCommandBars( xCommandBars ), m_sNames( sNames ), m_nCurrentPosition( 0 ), m_xModel( xModel )
++    CommandBarEnumeration( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, VbaCommandBarHelperRef pHelper) throw ( uno::RuntimeException ) : m_xParent( xParent ), m_xContext( xContext ), pCBarHelper( pHelper ) , m_nCurrentPosition( 0 )
+     {
++        uno::Reference< container::XNameAccess > xNameAccess = pCBarHelper->getPersistentWindowState();
++        m_sNames = xNameAccess->getElementNames();
+     }
+     virtual sal_Bool SAL_CALL hasMoreElements() throw ( uno::RuntimeException )
+     {
+@@ -67,28 +70,14 @@ public:
+     }
+     virtual uno::Any SAL_CALL nextElement() throw ( container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException )
+     {
++        // FIXME: should be add menubar
+         if( hasMoreElements() )
+         {
+-            rtl::OUString sName( m_sNames[ m_nCurrentPosition ] );
+-            m_nCurrentPosition = m_nCurrentPosition + 1;
+-            if( sName.indexOf( rtl::OUString::createFromAscii("private:resource/toolbar/") ) != -1 ) 
++            rtl::OUString sResourceUrl( m_sNames[ m_nCurrentPosition++ ] );
++            if( sResourceUrl.indexOf( rtl::OUString::createFromAscii("private:resource/toolbar/") ) != -1 ) 
+             {
+-                sal_Int32 nLastIndex = sName.lastIndexOf( rtl::OUString::createFromAscii( "/" ) );
+-                if( ( nLastIndex != -1 ) && ( ( nLastIndex + 1 ) < sName.getLength() ) )
+-                {
+-                   sName = sName.copy( nLastIndex + 1);
+-                   if( sName.getLength() > 0 )
+-                   {
+-                        uno::Reference< XHelperInterface > xHelperInterface( m_xCommandBars, uno::UNO_QUERY_THROW );
+-                        uno::Reference< XCommandBar > xCommandBar( new ScVbaCommandBar( xHelperInterface, m_xContext, m_xModel,  sName, sal_True, sal_False ) );
+-                        if( xCommandBar.is() )
+-                            return uno::makeAny( xCommandBar );
+-                        else
+-                            return nextElement();
+-                    }
+-                    else
+-                        return nextElement();
+-                    }
++                uno::Reference< container::XIndexAccess > xCBarSetting = pCBarHelper->getAppCfgManager()->getSettings( sResourceUrl, sal_True );
++                uno::Reference< XCommandBar > xCommandBar( new ScVbaCommandBar( m_xParent, m_xContext, pCBarHelper, xCBarSetting, sResourceUrl, sal_False, sal_False ) );
+              }
+              else
+                 return nextElement();
+@@ -99,90 +88,99 @@ public:
+     }
+ };
+ 
+-
+-ScVbaCommandBars::ScVbaCommandBars( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< container::XIndexAccess > xIndexAccess, const uno::Reference< frame::XModel >& xModel ) : CommandBars_BASE( xParent, xContext, xIndexAccess ), m_xModel( xModel )
++ScVbaCommandBars::ScVbaCommandBars( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< container::XIndexAccess >& xIndexAccess, const uno::Reference< frame::XModel >& xModel ) throw ( uno::RuntimeException ) : CommandBars_BASE( xParent, xContext, xIndexAccess )
+ {
+-    retrieveObjects();
++    pCBarHelper.reset( new VbaCommandBarHelper( mxContext, xModel ) );
++    m_xNameAccess = pCBarHelper->getPersistentWindowState();
+ }
+-void
+-ScVbaCommandBars::retrieveObjects() throw ( uno::RuntimeException )
++
++ScVbaCommandBars::~ScVbaCommandBars()
+ {
+-    uno::Reference< lang::XServiceInfo > xServiceInfo( m_xModel, uno::UNO_QUERY_THROW );
+-    if( xServiceInfo->supportsService( sSpreadsheetDocumentUrl ) )
+-    {
+-        m_sModuleName = sSpreadsheetDocumentUrl;
+-    }
+-    else if( xServiceInfo->supportsService( sTextDocumentUrl ) )
+-    {
+-        m_sModuleName = sTextDocumentUrl;
+-    }
+-    else
+-        throw uno::RuntimeException( rtl::OUString::createFromAscii( "Unsupported Document" ), uno::Reference< uno::XInterface >() );
+-    
+-    uno::Reference < lang::XMultiServiceFactory > xMSF( mxContext->getServiceManager(), uno::UNO_QUERY_THROW );
+-    uno::Reference < container::XNameAccess > xNameAccess( xMSF->createInstance( sWindowStateConfUrl ), uno::UNO_QUERY_THROW );
+-    m_xNameAccess.set( xNameAccess->getByName( m_sModuleName ), uno::UNO_QUERY_THROW );
+ }
+ 
+ // XEnumerationAccess
+ uno::Type SAL_CALL 
+ ScVbaCommandBars::getElementType() throw ( uno::RuntimeException )
+ {
+-    return XCommandBars::static_type( 0 );
++    return XCommandBar::static_type( 0 );
+ }
++
+ uno::Reference< container::XEnumeration >
+ ScVbaCommandBars::createEnumeration() throw ( uno::RuntimeException )
+ {
+-    return uno::Reference< container::XEnumeration >( new CommandBarEnumeration( mxContext, this, m_xNameAccess->getElementNames(), m_xModel ) );
++    return uno::Reference< container::XEnumeration >( new CommandBarEnumeration( this, mxContext, pCBarHelper ) );
+ }
+ 
+ uno::Any
+ ScVbaCommandBars::createCollectionObject( const uno::Any& aSource )
+ {
+     // aSource should be a name at this time, because of the class is API wrapper.
+-    rtl::OUString sToolBarName;
+-    if( aSource >>= sToolBarName )
++    rtl::OUString sResourceUrl;
++    uno::Reference< container::XIndexAccess > xBarSettings;
++    rtl::OUString sBarName;
++    sal_Bool bMenu = sal_False;
++    if( aSource >>= sBarName )
+     {
+-        sToolBarName = sToolBarName.toAsciiLowerCase();
+-        if( sToolBarName.equalsIgnoreAsciiCase( rtl::OUString::createFromAscii("Worksheet Menu Bar") ) )
+-        {
+-            return uno::makeAny( uno::Reference< XCommandBar > ( new ScVbaCommandBar( this, mxContext, m_xModel, 0 ) ) );
+-        }
+-        else if( sToolBarName.equalsIgnoreAsciiCase( rtl::OUString::createFromAscii("Menu Bar") ) )
++        if( sBarName.equalsIgnoreAsciiCase( rtl::OUString::createFromAscii("Worksheet Menu Bar") )
++            || sBarName.equalsIgnoreAsciiCase( rtl::OUString::createFromAscii("Menu Bar") ) )
+         {
+-            return uno::makeAny( uno::Reference< XCommandBar > ( new ScVbaCommandBar( this, mxContext, m_xModel, 1 ) ) );
++            // menu bar
++            sResourceUrl = pCBarHelper->getMenuBarUrl();
++            bMenu = sal_True;
+         }
+-        else if( checkToolBarExist( sToolBarName ) )
++        else
+         {
+-            return uno::makeAny( uno::Reference< XCommandBar > (new ScVbaCommandBar( this, mxContext, m_xModel, sToolBarName, sal_True, sal_False ) ) );
++            sResourceUrl = pCBarHelper->findToolbarByName( m_xNameAccess, sBarName );
++            bMenu = sal_False;
+         }
+     }
+-    return uno::Any();
++
++    if( sResourceUrl.getLength() )
++        xBarSettings = pCBarHelper->getAppCfgManager()->getSettings( sResourceUrl, sal_True );
++    else
++        throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Toolbar do not exist") ), uno::Reference< uno::XInterface >() );
++
++    return uno::Any( uno::Reference< XCommandBar >( new ScVbaCommandBar( this, mxContext, pCBarHelper, xBarSettings, sResourceUrl, bMenu, sal_False ) ) );
+ }
+ 
+ // XCommandBars
+ uno::Reference< XCommandBar > SAL_CALL 
+ ScVbaCommandBars::Add( const css::uno::Any& Name, const css::uno::Any& /*Position*/, const css::uno::Any& /*MenuBar*/, const css::uno::Any& Temporary ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+ {
++    // FIXME: only support to add Toolbar
+     // Position - MsoBar MenuBar - sal_Bool
+     // Currently only the Name is supported.
+     rtl::OUString sName;
+-    if( !( Name >>= sName ) )
++    if( Name.hasValue() )
++        Name >>= sName;
++
++    rtl::OUString sResourceUrl;
++    if( sName.getLength() )
+     {
+-        sName = rtl::OUString::createFromAscii("Custom1");
++        sResourceUrl = pCBarHelper->findToolbarByName( m_xNameAccess, sName );
++        if( sResourceUrl.getLength() )
++            throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Toolbar exists") ), uno::Reference< uno::XInterface >() );
+     }
+-    sal_Bool bTemporary = false;
+-    if( !( Temporary >>= bTemporary ) )
++    else
+     {
+-        bTemporary = sal_True;
+-    }
+-    return uno::Reference< XCommandBar >( new ScVbaCommandBar( this, mxContext, m_xModel, sName.toAsciiLowerCase(), bTemporary, sal_True ) );
++        sName = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Custom1") );
++    }    
++
++    sal_Bool bTemporary = sal_False;
++    if( Temporary.hasValue() )
++        Temporary >>= bTemporary;
++    
++    sResourceUrl = VbaCommandBarHelper::generateCustomURL();
++    uno::Reference< container::XIndexAccess > xBarSettings( pCBarHelper->getAppCfgManager()->createSettings(), uno::UNO_QUERY_THROW );
++    uno::Reference< XCommandBar > xCBar( new ScVbaCommandBar( this, mxContext, pCBarHelper, xBarSettings, sResourceUrl, sal_False, bTemporary ) );
++    xCBar->setName( sName );
++    return xCBar;
+ }
+ sal_Int32 SAL_CALL 
+ ScVbaCommandBars::getCount() throw(css::uno::RuntimeException)
+ {
+     // Filter out all toolbars from the window collection
+-    sal_Int32 nCount = 0;
++    sal_Int32 nCount = 1; // there is a Menubar in OOo
+     uno::Sequence< ::rtl::OUString > allNames = m_xNameAccess->getElementNames();
+     for( sal_Int32 i = 0; i < allNames.getLength(); i++ )
+     {
+@@ -209,9 +207,9 @@ ScVbaCommandBars::Item( const uno::Any& aIndex, const uno::Any& /*aIndex2*/ ) th
+     if( nIndex == 1 )
+     {
+         uno::Any aSource;
+-        if( m_sModuleName.equalsIgnoreAsciiCase( sSpreadsheetDocumentUrl ) )
++        if( pCBarHelper->getModuleId().equalsAscii( "com.sun.star.sheet.SpreadsheetDocument" ) )
+             aSource <<= rtl::OUString::createFromAscii( "Worksheet Menu Bar" );
+-        else if( m_sModuleName.equalsIgnoreAsciiCase( sTextDocumentUrl ) )
++        else if( pCBarHelper->getModuleId().equalsAscii("com.sun.star.text.TextDocument") )
+             aSource <<= rtl::OUString::createFromAscii( "Menu Bar" );
+         if( aSource.hasValue() )    
+             return createCollectionObject( aSource );
+@@ -219,28 +217,6 @@ ScVbaCommandBars::Item( const uno::Any& aIndex, const uno::Any& /*aIndex2*/ ) th
+     return uno::Any();
+ }
+ 
+-sal_Bool
+-ScVbaCommandBars::checkToolBarExist( rtl::OUString sToolBarName )
+-{
+-    CommandBarNameMap::const_iterator iter = mCommandBarNameMap.find( sToolBarName.toAsciiLowerCase() );
+-    if( iter != mCommandBarNameMap.end() )
+-    {
+-        return sal_True;
+-    }    
+-    uno::Sequence< ::rtl::OUString > allNames = m_xNameAccess->getElementNames();
+-    for( sal_Int32 i = 0; i < allNames.getLength(); i++ )
+-    {
+-        if(allNames[i].indexOf( rtl::OUString::createFromAscii("private:resource/toolbar/") ) != -1 )
+-        {
+-            if( allNames[i].indexOf( sToolBarName ) != -1 )
+-            {
+-                return sal_True;
+-            }
+-        }
+-    }
+-    return sal_False;
+-}
+-    
+ // XHelperInterface
+ rtl::OUString& 
+ ScVbaCommandBars::getServiceImplName()
+diff --git vbahelper/source/vbahelper/vbacommandbars.hxx vbahelper/source/vbahelper/vbacommandbars.hxx
+index d1ebf4b..2c0cc3f 100644
+--- vbahelper/source/vbahelper/vbacommandbars.hxx
++++ vbahelper/source/vbahelper/vbacommandbars.hxx
+@@ -38,32 +38,22 @@
+ #include <ooo/vba/XCommandBar.hpp>
+ #include <ooo/vba/XCommandBars.hpp>
+ #include <com/sun/star/container/XNameAccess.hpp>
+-
+ #include <cppuhelper/implbase1.hxx>
+-
+ #include <vbahelper/vbahelperinterface.hxx>
+ #include <vbahelper/vbacollectionimpl.hxx>
++#include "vbacommandbarhelper.hxx"
+ 
+ typedef CollTestImplHelper< ov::XCommandBars > CommandBars_BASE;
+ 
+ class ScVbaCommandBars : public CommandBars_BASE
+ {
+ private:
+-    css::uno::Reference< css::container::XNameAccess > m_xNameAccess;
+-    rtl::OUString m_sModuleName;
+-    void retrieveObjects() throw( css::uno::RuntimeException );
+-protected:
+-    css::uno::Reference< css::frame::XModel > m_xModel;
++    VbaCommandBarHelperRef pCBarHelper;
++
+ public:
+-    ScVbaCommandBars( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::container::XIndexAccess > xIndexAccess, const css::uno::Reference< css::frame::XModel >& xModel );
++    ScVbaCommandBars( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess, const css::uno::Reference< css::frame::XModel >& xModel ) throw (css::uno::RuntimeException);
++    virtual ~ScVbaCommandBars();
+ 
+-    sal_Bool checkToolBarExist( rtl::OUString sToolBarName );
+-    rtl::OUString GetModuleName(){ return m_sModuleName; };
+-    css::uno::Reference< css::container::XNameAccess > GetWindows() 
+-    { 
+-        retrieveObjects();
+-        return m_xNameAccess; 
+-    };
+     // XCommandBars
+     virtual css::uno::Reference< ov::XCommandBar > SAL_CALL Add( const css::uno::Any& Name, const css::uno::Any& Position, const css::uno::Any& MenuBar, const css::uno::Any& Temporary ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+     // XEnumerationAccess
+diff --git vbahelper/source/vbahelper/vbahelper.cxx vbahelper/source/vbahelper/vbahelper.cxx
+index 2a51ee4..8290f66 100644
+--- vbahelper/source/vbahelper/vbahelper.cxx
++++ vbahelper/source/vbahelper/vbahelper.cxx
+@@ -917,6 +917,33 @@ void setDefaultPropByIntrospection( const uno::Any& aObj, const uno::Any& aValue
+         throw uno::RuntimeException();
+ }
+ 
++uno::Any getPropertyValue( const uno::Sequence< beans::PropertyValue >& aProp, const rtl::OUString& aName )
++{
++    uno::Any result;
++    for ( sal_Int32 i = 0; i < aProp.getLength(); i++ )
++    {
++        if ( aProp[i].Name.equals(aName) )
++        {
++            aProp[i].Value >>= result;
++            return result;
++        }
++    }
++    return result;
++}
++
++sal_Bool setPropertyValue( uno::Sequence< beans::PropertyValue >& aProp, const rtl::OUString& aName, const uno::Any& aValue )
++{
++    for ( sal_Int32 i = 0; i < aProp.getLength(); i++ )
++    {
++        if ( aProp[i].Name.equals(aName) )
++        {
++            aProp[i].Value = aValue;
++            return sal_True;
++        }
++    }
++    return sal_False;
++}
++
+ #define VBA_LEFT "PositionX"
+ #define VBA_TOP "PositionY"
+ UserFormGeometryHelper::UserFormGeometryHelper( const uno::Reference< uno::XComponentContext >& /*xContext*/, const uno::Reference< awt::XControl >& xControl )
