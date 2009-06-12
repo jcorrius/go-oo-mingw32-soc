@@ -3,6 +3,8 @@
 # create .gitignores for the the OOo tree
 # run in build/xyz680-mABC
 
+[ -d .git ] || git init
+
 chmod a+x solenv/bin/build.pl
 chmod a+x solenv/bin/gccinstlib.pl
 
