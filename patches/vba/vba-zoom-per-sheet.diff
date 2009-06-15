@@ -1,0 +1,273 @@
+diff --git sc/source/ui/inc/tabview.hxx sc/source/ui/inc/tabview.hxx
+index 882c88b..95a5663 100644
+--- sc/source/ui/inc/tabview.hxx
++++ sc/source/ui/inc/tabview.hxx
+@@ -298,7 +298,7 @@ public:
+ 
+ 	void			TabChanged();
+ 	void			SetZoom( const Fraction& rNewX, const Fraction& rNewY, BOOL bAll );
+-    void            RefreshZoom();
++	SC_DLLPUBLIC void            RefreshZoom();
+ 	void			SetPagebreakMode( BOOL bSet );
+ 
+ 	void			UpdateLayerLocks();
+diff --git sc/source/ui/inc/viewdata.hxx sc/source/ui/inc/viewdata.hxx
+index 27e6821..8557dc9 100644
+--- sc/source/ui/inc/viewdata.hxx
++++ sc/source/ui/inc/viewdata.hxx
+@@ -239,6 +239,7 @@ private:
+ 
+ 	SC_DLLPRIVATE void			CalcPPT();
+     SC_DLLPRIVATE void          CreateTabData( SCTAB nNewTab );
++    SC_DLLPRIVATE void          CreateTabData( std::vector< SCTAB >& rvTabs );
+     SC_DLLPRIVATE void          CreateSelectedTabData();
+ 
+ public:
+@@ -332,6 +333,8 @@ public:
+ 	void			SetPasteMode ( ScPasteFlags nFlags )            { nPasteFlags = nFlags; }
+ 
+     void            SetZoomType( SvxZoomType eNew, BOOL bAll );
++    void            SetZoomType( SvxZoomType eNew, std::vector< SCTAB >& tabs );
++    void            SetZoom( const Fraction& rNewX, const Fraction& rNewY, std::vector< SCTAB >& tabs );
+     void            SetZoom( const Fraction& rNewX, const Fraction& rNewY, BOOL bAll );
+     void            RefreshZoom();
+ 
+diff --git sc/source/ui/vba/excelvbahelper.cxx sc/source/ui/vba/excelvbahelper.cxx
+index 5f133d9..c98cab0 100644
+--- sc/source/ui/vba/excelvbahelper.cxx
++++ sc/source/ui/vba/excelvbahelper.cxx
+@@ -44,6 +44,13 @@ namespace vba
+ {
+ namespace excel
+ {
++void implSetZoom( const uno::Reference< frame::XModel >& xModel, sal_Int16 nZoom, std::vector< SCTAB >& nTabs )
++{
++    ScTabViewShell* pViewSh = excel::getBestViewShell( xModel );
++    Fraction aFract( nZoom, 100 );
++    pViewSh->GetViewData()->SetZoom( aFract, aFract, nTabs );
++    pViewSh->RefreshZoom();
++}
+ bool isInPrintPreview( SfxViewFrame* pView )
+ {
+ 	sal_uInt16 nViewNo = SID_VIEWSHELL1 - SID_VIEWSHELL0;
+diff --git sc/source/ui/vba/excelvbahelper.hxx sc/source/ui/vba/excelvbahelper.hxx
+index 3a3b7f8..af3e0bb 100644
+--- sc/source/ui/vba/excelvbahelper.hxx
++++ sc/source/ui/vba/excelvbahelper.hxx
+@@ -41,6 +41,8 @@ namespace ooo
+ 	{
+ 	namespace excel
+         { 
++                // nTabs empty means apply zoom to all sheets
++                void implSetZoom( const css::uno::Reference< css::frame::XModel >& xModel, sal_Int16 nZoom, std::vector< SCTAB >& nTabs );
+ 		void implnCopy();
+ 		void implnPaste();
+ 		void implnCut();
+diff --git sc/source/ui/vba/vbawindow.cxx sc/source/ui/vba/vbawindow.cxx
+index c64e156..ea93022 100644
+--- sc/source/ui/vba/vbawindow.cxx
++++ sc/source/ui/vba/vbawindow.cxx
+@@ -58,6 +58,9 @@ using namespace ::com::sun::star;
+ using namespace ::ooo::vba;
+ using namespace ::ooo::vba::excel::XlWindowState;
+ 
++// nameExists defined in vbaworksheet.cxx
++bool nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUString & name, SCTAB& nTab ) throw ( lang::IllegalArgumentException );
++
+ typedef  std::hash_map< rtl::OUString,
+ SCTAB, ::rtl::OUStringHash,
+ ::std::equal_to< ::rtl::OUString > > NameIndexHash;
+@@ -735,24 +738,18 @@ ScVbaWindow::getZoom() throw (uno::RuntimeException)
+ void SAL_CALL 
+ ScVbaWindow::setZoom( const uno::Any& _zoom ) throw (uno::RuntimeException)
+ {
+-	uno::Reference< beans::XPropertySet > xProps( m_xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+-	rtl::OUString sZoomType( RTL_CONSTASCII_USTRINGPARAM( SC_UNO_ZOOMTYPE ) );
+-	sal_Int16 nZoomType = view::DocumentZoomType::PAGE_WIDTH;
+-	if( _zoom.getValueTypeClass() == uno::TypeClass_BOOLEAN )
+-	{		
+-		//zoom type is PAGE_WIDTH_EXACT in helperapi, it seems that there is a issue for this zoom type in current OOo.
+-		// so PAGE_WIDTH is used.   	
+-		xProps->setPropertyValue(sZoomType, uno::makeAny( nZoomType ));
+-	}					
+-	else
+-	{
+-		nZoomType = view::DocumentZoomType::BY_VALUE;
+-		rtl::OUString sZoomValue( RTL_CONSTASCII_USTRINGPARAM( SC_UNO_ZOOMVALUE ));
+-		sal_Int16 nZoomValue = 100;
+-		_zoom >>= nZoomValue;
+-		xProps->setPropertyValue( sZoomType, uno::makeAny( nZoomType ));
+-		xProps->setPropertyValue( sZoomValue, uno::makeAny( nZoomValue ));
+-	}			
++    sal_Int16 nZoom = 100;
++    _zoom >>= nZoom;
++    uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( m_xModel, uno::UNO_QUERY_THROW );
++    uno::Reference< excel::XWorksheet > xActiveSheet = ActiveSheet();
++    SCTAB nTab = 0;
++    rtl::OUString sName = xActiveSheet->getName();
++    bool bSheetExists = nameExists (xSpreadDoc, sName, nTab);
++    if ( !bSheetExists )
++        throw uno::RuntimeException();
++    std::vector< SCTAB > vTabs;
++    vTabs.push_back( nTab );
++    excel::implSetZoom( m_xModel, nZoom, vTabs );
+ }
+ 
+ uno::Reference< excel::XWorksheet > SAL_CALL 
+diff --git sc/source/ui/vba/vbaworksheet.cxx sc/source/ui/vba/vbaworksheet.cxx
+index a416c8c..76c2f21 100644
+--- sc/source/ui/vba/vbaworksheet.cxx
++++ sc/source/ui/vba/vbaworksheet.cxx
+@@ -96,7 +96,7 @@
+ #define DOESNOTEXIST -1
+ using namespace com::sun::star;
+ using namespace ooo::vba;
+-static bool
++bool
+ nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUString & name, SCTAB& nTab ) throw ( lang::IllegalArgumentException )
+ {
+ 	if (!xSpreadDoc.is())
+diff --git sc/source/ui/view/viewdata.cxx sc/source/ui/view/viewdata.cxx
+index ea04a47..1b2a7b8 100644
+--- sc/source/ui/view/viewdata.cxx
++++ sc/source/ui/view/viewdata.cxx
+@@ -650,66 +650,103 @@ void ScViewData::SetViewShell( ScTabViewShell* pViewSh )
+ 		pView		= NULL;
+ 	}
+ }
++void ScViewData::CreateTabData( std::vector< SCTAB >& rvTabs )
++{
++    std::vector< SCTAB >::iterator it_end = rvTabs.end();
++    for ( std::vector< SCTAB >::iterator it = rvTabs.begin(); it != it_end; ++it )
++        if ( !pTabData[*it] )
++            CreateTabData( *it );
++}
+ 
+-void ScViewData::SetZoomType( SvxZoomType eNew, BOOL bAll )
++void ScViewData::SetZoomType( SvxZoomType eNew, std::vector< SCTAB >& tabs )
+ {
+-    if ( !bAll )
+-        CreateSelectedTabData();    // if zoom is set for a table, it must be stored
++    BOOL bAll = ( tabs.size() == 0 );
++
++    if ( !bAll ) // create associated table data
++        CreateTabData( tabs );
+ 
+-    for ( SCTAB i = 0; i <= MAXTAB; i++ )
+-        if ( pTabData[i] && ( bAll || aMarkData.GetTableSelect(i) ) )
++    std::vector< SCTAB >::iterator it_end = tabs.end();
++    std::vector< SCTAB >::iterator it = tabs.begin();
++    for ( SCTAB i = ( bAll ? 0 : *it ); ( bAll ? i <= MAXTAB :  it != it_end  ); ++i , ++it )
++    {
++        if ( pTabData[i] )
+             pTabData[i]->eZoomType = eNew;
++    } 
+ 
+     if ( bAll )
+         eDefZoomType = eNew;
+ }
+ 
+-void ScViewData::SetZoom( const Fraction& rNewX, const Fraction& rNewY, BOOL bAll )
++void ScViewData::SetZoomType( SvxZoomType eNew, BOOL bAll )
++{
++    std::vector< SCTAB > vTabs; // Empty for all tabs
++    if ( !bAll ) // get selected tabs
++    {
++        SCTAB nTabCount = pDoc->GetTableCount();
++        for (SCTAB i=0; i<nTabCount; i++)
++        {
++            if ( aMarkData.GetTableSelect(i)  )
++                vTabs.push_back( i );
++        }
++    } 
++    SetZoomType( eNew, vTabs );
++}
++
++void ScViewData::SetZoom( const Fraction& rNewX, const Fraction& rNewY, std::vector< SCTAB >& tabs )
+ {
+-    if ( !bAll )
+-        CreateSelectedTabData();    // if zoom is set for a table, it must be stored
++    BOOL bAll = ( tabs.size() == 0 );
++    if ( !bAll ) // create associated table data
++        CreateTabData( tabs );
++    Fraction aFrac20( 1,5 );
++    Fraction aFrac400( 4,1 );
+ 
+-	Fraction aFrac20( 1,5 );
+-	Fraction aFrac400( 4,1 );
++    Fraction aValidX = rNewX;
++    if (aValidX<aFrac20)
++        aValidX = aFrac20;
++    if (aValidX>aFrac400)
++        aValidX = aFrac400;
+ 
+-	Fraction aValidX = rNewX;
+-	if (aValidX<aFrac20) aValidX = aFrac20;
+-	if (aValidX>aFrac400) aValidX = aFrac400;
++    Fraction aValidY = rNewY;
++    if (aValidY<aFrac20)
++        aValidY = aFrac20;
++    if (aValidY>aFrac400)
++        aValidY = aFrac400;
+ 
+-	Fraction aValidY = rNewY;
+-	if (aValidY<aFrac20) aValidY = aFrac20;
+-	if (aValidY>aFrac400) aValidY = aFrac400;
++    std::vector< SCTAB >::iterator it_end = tabs.end();
++    std::vector< SCTAB >::iterator it = tabs.begin();
+ 
+-	if ( bPagebreak )
+-	{
+-        for ( SCTAB i = 0; i <= MAXTAB; i++ )
+-            if ( pTabData[i] && ( bAll || aMarkData.GetTableSelect(i) ) )
++    for ( SCTAB i = ( bAll ? 0 : *it ); ( bAll ? i <= MAXTAB :  it != it_end  ); ++i , ++it )
++    {
++        if ( pTabData[i] )
++        {
++            if ( bPagebreak )
+             {
+                 pTabData[i]->aPageZoomX = aValidX;
+                 pTabData[i]->aPageZoomY = aValidY;
+             }
+-        if ( bAll )
+-        {
+-            aDefPageZoomX = aValidX;
+-            aDefPageZoomY = aValidY;
+-        }
+-	}
+-	else
+-	{
+-        for ( SCTAB i = 0; i <= MAXTAB; i++ )
+-            if ( pTabData[i] && ( bAll || aMarkData.GetTableSelect(i) ) )
++            else
+             {
+                 pTabData[i]->aZoomX = aValidX;
+                 pTabData[i]->aZoomY = aValidY;
+             }
+-        if ( bAll )
+-        {
+-            aDefZoomX = aValidX;
+-            aDefZoomY = aValidY;
+         }
+-	}
++    }
++    RefreshZoom();
++}
+ 
+-	RefreshZoom();
++void ScViewData::SetZoom( const Fraction& rNewX, const Fraction& rNewY, BOOL bAll )
++{
++    std::vector< SCTAB > vTabs;
++    if ( !bAll ) // get selected tabs
++    {
++        SCTAB nTabCount = pDoc->GetTableCount();
++        for (SCTAB i=0; i<nTabCount; i++)
++        {
++            if ( aMarkData.GetTableSelect(i)  )
++                vTabs.push_back( i );
++        }
++    } 
++    SetZoom( rNewX, rNewY, vTabs );
+ }
+ 
+ void ScViewData::SetShowGrid( bool bShow )
