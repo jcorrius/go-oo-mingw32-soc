@@ -1,0 +1,121 @@
+diff --git sc/inc/document.hxx sc/inc/document.hxx
+index fe64a22..862682c 100644
+--- sc/inc/document.hxx
++++ sc/inc/document.hxx
+@@ -880,6 +880,8 @@ public:
+ 
+     USHORT			GetErrCode( const ScAddress& ) const;
+ 
++    bool            ShrinkToDataArea(SCTAB nTab, SCCOL& rStartCol, SCROW& rStartRow, SCCOL& rEndCol, SCROW& rEndRow) const;
++
+     void			GetDataArea( SCTAB nTab, SCCOL& rStartCol, SCROW& rStartRow,
+ 									SCCOL& rEndCol, SCROW& rEndRow, BOOL bIncludeOld ) const;
+     SC_DLLPUBLIC BOOL			GetCellArea( SCTAB nTab, SCCOL& rEndCol, SCROW& rEndRow ) const;
+diff --git sc/source/core/data/document.cxx sc/source/core/data/document.cxx
+index ea3f282..c69dc5c 100644
+--- sc/source/core/data/document.cxx
++++ sc/source/core/data/document.cxx
+@@ -642,6 +642,32 @@ BOOL ScDocument::GetTableArea( SCTAB nTab, SCCOL& rEndCol, SCROW& rEndRow ) cons
+     return FALSE;
+ }
+ 
++bool ScDocument::ShrinkToDataArea(SCTAB nTab, SCCOL& rStartCol, SCROW& rStartRow, SCCOL& rEndCol, SCROW& rEndRow) const
++{
++    if (!ValidTab(nTab) || !pTab[nTab])
++        return false;
++
++    SCCOL nCol1, nCol2;
++    SCROW nRow1, nRow2;
++    pTab[nTab]->GetFirstDataPos(nCol1, nRow1);
++    pTab[nTab]->GetLastDataPos(nCol2, nRow2);
++
++    if (nCol1 > nCol2 || nRow1 > nRow2)
++        // invalid range.
++        return false;
++
++    // Make sure the area only shrinks, and doesn't grow.
++    if (rStartCol < nCol1)
++        rStartCol = nCol1;
++    if (nCol2 < rEndCol)
++        rEndCol = nCol2;
++    if (rStartRow < nRow1)
++        rStartRow = nRow1;
++    if (nRow2 < rEndRow)
++        rEndRow = nRow2;
++
++    return true;  // success!
++}
+ 
+ //	zusammenhaengender Bereich
+ 
+diff --git sc/source/core/data/table2.cxx sc/source/core/data/table2.cxx
+index 4274be7..7907caa 100644
+--- sc/source/core/data/table2.cxx
++++ sc/source/core/data/table2.cxx
+@@ -978,6 +978,9 @@ void ScTable::GetFirstDataPos(SCCOL& rCol, SCROW& rRow) const
+ {
+     rCol = 0;
+     rRow = 0;
++    while (aCol[rCol].IsEmptyData() && rCol < MAXCOL)
++        ++rCol;
++    rRow = aCol[rCol].GetFirstDataPos();
+ }
+ 
+ void ScTable::GetLastDataPos(SCCOL& rCol, SCROW& rRow) const
+diff --git sc/source/ui/inc/dbfunc.hxx sc/source/ui/inc/dbfunc.hxx
+index 3f25558..8dfafd9 100644
+--- sc/source/ui/inc/dbfunc.hxx
++++ sc/source/ui/inc/dbfunc.hxx
+@@ -80,7 +80,7 @@ public:
+     void			GotoDBArea( const String& rDBName );
+ 
+                     // DB-Bereich vom Cursor
+-    ScDBData* 		GetDBData( bool bMarkArea = true, ScGetDBMode eMode = SC_DB_MAKE, bool bExpandRows = false );
++    ScDBData* 		GetDBData( bool bMarkArea = true, ScGetDBMode eMode = SC_DB_MAKE, bool bExpandRows = false, bool bShrinkToData = false );
+ 
+     void			NotifyCloseDbNameDlg( const ScDBCollection& rNewColl, const List& rDelAreaList );
+ 
+diff --git sc/source/ui/view/dbfunc.cxx sc/source/ui/view/dbfunc.cxx
+index b985912..ce3dede 100644
+--- sc/source/ui/view/dbfunc.cxx
++++ sc/source/ui/view/dbfunc.cxx
+@@ -108,13 +108,29 @@ void ScDBFunc::GotoDBArea( const String& rDBName )
+ 
+ //	aktuellen Datenbereich fuer Sortieren / Filtern suchen
+ 
+-ScDBData* ScDBFunc::GetDBData( bool bMark, ScGetDBMode eMode, bool bExpandRows )
++ScDBData* ScDBFunc::GetDBData( bool bMark, ScGetDBMode eMode, bool bExpandRows, bool bShrinkToData )
+ {
+     ScDocShell* pDocSh = GetViewData()->GetDocShell();
+     ScDBData* pData = NULL;
+     ScRange aRange;
+     if ( GetViewData()->GetSimpleArea(aRange) == SC_MARK_SIMPLE )
++    {
++        if (bShrinkToData)
++        {
++            // Shrink the range to only include data area.
++            ScDocument* pDoc = pDocSh->GetDocument();
++            SCCOL nCol1 = aRange.aStart.Col(), nCol2 = aRange.aEnd.Col();
++            SCROW nRow1 = aRange.aStart.Row(), nRow2 = aRange.aEnd.Row();
++            if (pDoc->ShrinkToDataArea(aRange.aStart.Tab(), nCol1, nRow1, nCol2, nRow2))
++            {
++                aRange.aStart.SetCol(nCol1);
++                aRange.aEnd.SetCol(nCol2);
++                aRange.aStart.SetRow(nRow1);
++                aRange.aEnd.SetRow(nRow2);
++            }
++        }
+         pData = pDocSh->GetDBData( aRange, eMode, FALSE );
++    }
+     else if ( eMode != SC_DB_OLD )
+         pData = pDocSh->GetDBData(
+                     ScRange( GetViewData()->GetCurX(), GetViewData()->GetCurY(),
+@@ -286,7 +302,7 @@ void ScDBFunc::ToggleAutoFilter()
+ 
+     ScQueryParam	aParam;
+     ScDocument*		pDoc	= GetViewData()->GetDocument();
+-    ScDBData*		pDBData = GetDBData( FALSE );
++    ScDBData*		pDBData = GetDBData(false, SC_DB_MAKE, false, true);
+ 
+     pDBData->SetByRow( TRUE );				//! Undo, vorher abfragen ??
+     pDBData->GetQueryParam( aParam );
