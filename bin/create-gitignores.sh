@@ -40,6 +40,7 @@ done << EOF
 /MacOS*Env.Set*
 /bootstrap
 /makefile.mk
+/ID
 unxlng*.pro
 unxlngi6
 unxmacx*.pro
