@@ -8,3 +8,7 @@ $(BUILDDIR)/bin/tweakconfig.oxt: *.xcu *.xml
 	zip $@ $(BUILDDIR)/bin/tweakconfig/*.xcu $(BUILDDIR)/bin/tweakconfig/*.xml 
 
 all: tweakconfig
+
+clean-local:
+	rm -f $(BUILDDIR)/bin/tweakconfig.oxt
+	rm -rf $(BUILDDIR)/bin/tweakconfig
