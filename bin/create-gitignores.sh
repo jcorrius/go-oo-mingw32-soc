@@ -49,6 +49,7 @@ localize.sdf
 .svn
 /solver
 *.orig
+*~
 autom4te.cache/
 config.log
 config.parms
