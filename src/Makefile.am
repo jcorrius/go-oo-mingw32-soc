@@ -3,9 +3,11 @@ SUBDIRS=helpcontent2 icons layout sdf
 EXTRA_DIST=\
 	${wildcard *.dic} \
 	Draft.jpg \
+	banner_go-oo.bmp \
 	banner_nld.bmp \
 	cli_uno_bridge.dll.config.in \
 	mono-ooo.pc.in \
+	nologoinstall_go-oo.bmp \
 	nologoinstall_nld.bmp \
 	openintro_go-oo.bmp \
 	openabout_go-oo.bmp \
