@@ -1,9 +1,9 @@
 diff --git sc/inc/mdds/flatsegmenttree.hxx sc/inc/mdds/flatsegmenttree.hxx
 new file mode 100644
-index 0000000..d5ab674
+index 0000000..96a6256
 --- /dev/null
 +++ sc/inc/mdds/flatsegmenttree.hxx
-@@ -0,0 +1,662 @@
+@@ -0,0 +1,761 @@
 +/*************************************************************************
 + *
 + * Copyright (c) 2008-2009 Kohei Yoshida
@@ -147,6 +147,7 @@ index 0000000..d5ab674
 +        m_root_node(static_cast<node*>(NULL)),
 +        m_left_leaf(new node(true)),
 +        m_right_leaf(new node(true)),
++        m_init_val(init_val),
 +        m_valid_tree(false)
 +    {
 +        // we need to create two end nodes during initialization.
@@ -316,8 +317,8 @@ index 0000000..d5ab674
 +
 +    /** 
 +     * Remove a segment specified by the start and end key values, and shift 
-+     * the remaining segments (segments with key values greater than the end
-+     * key of the removed segment) to left. 
++     * the remaining segments (i.e. those segments that come after the removed
++     * segment) to left. 
 +     *
 +     * @param start start value of the segment being removed.
 +     * @param end end value of the segment being removed. 
@@ -327,8 +328,18 @@ index 0000000..d5ab674
 +        if (start >= end)
 +            return;
 +
++        key_type left_leaf_key = get_node(m_left_leaf)->value_leaf.key;
++        key_type right_leaf_key = get_node(m_right_leaf)->value_leaf.key;
++        if (start < left_leaf_key || end < left_leaf_key)
++            // invalid key value
++            return;
++
++        if (start > right_leaf_key || end > right_leaf_key)
++            // invalid key value.
++            return;
++
 +        node_base_ptr node_pos;
-+        if (get_node(m_left_leaf)->value_leaf.key == start)
++        if (left_leaf_key == start)
 +            node_pos = m_left_leaf;
 +        else
 +            // Get the first node with a key value equal to or greater than the 
@@ -345,7 +356,7 @@ index 0000000..d5ab674
 +            // The removed segment does not overlap with any nodes.  Simply 
 +            // shift the key values of those nodes that come after the removed
 +            // segment.
-+            shift_leaf_key(node_pos, m_right_leaf, segment_size);
++            shift_leaf_key_left(node_pos, m_right_leaf, segment_size);
 +            m_valid_tree = false;
 +            return;
 +        }
@@ -377,7 +388,64 @@ index 0000000..d5ab674
 +            disconnect_node(start_pos.get());
 +        }
 +
-+        shift_leaf_key(node_pos, m_right_leaf, segment_size);
++        shift_leaf_key_left(node_pos, m_right_leaf, segment_size);
++        m_valid_tree = false;
++    }
++
++    /** 
++     * Shift all segments that occur at or after the specified start position 
++     * to right by the size specified.
++     *
++     * @param pos position where the right-shift occurs.
++     * @param size amount of shift (must be greater than 0)
++     */
++    void shift_segment_right(key_type pos, key_type size, bool skip_start_node)
++    {
++        if (size <= 0)
++            return;
++
++        if (pos < get_node(m_left_leaf)->value_leaf.key || get_node(m_right_leaf)->value_leaf.key <= pos)
++            // specified position is out-of-bound
++            return;
++
++        if (get_node(m_left_leaf)->value_leaf.key == pos)
++        {
++            // Position is at the leftmost node.  Shift all the other nodes, 
++            // and insert a new node at (pos + size) position.
++            node_base_ptr cur_node = m_left_leaf->right;
++            shift_leaf_key_right(cur_node, m_right_leaf, size);
++
++            if (get_node(m_left_leaf)->value_leaf.value != m_init_val)
++            {
++                // The leftmost leaf node has a non-initial value.  We need to
++                // insert a new node to carry that value after the shift.
++                node_base_ptr new_node(new node(true));
++                get_node(new_node)->value_leaf.key = pos + size;
++                get_node(new_node)->value_leaf.value = get_node(m_left_leaf)->value_leaf.value;
++                get_node(m_left_leaf)->value_leaf.value = m_init_val;
++                new_node->left = m_left_leaf;
++                new_node->right = m_left_leaf->right;
++                m_left_leaf->right = new_node;
++            }
++
++            m_valid_tree = false;
++            return;
++        }
++
++        // Get the first node with a key value equal to or greater than the
++        // start key value.  But we want to skip the leftmost node.
++        node_base_ptr cur_node = get_insertion_pos_leaf(pos, m_left_leaf->right);
++
++        // If the point of insertion is at an existing node position, don't 
++        // shift that node but start with the one after it if that's
++        // requested.
++        if (skip_start_node && cur_node && get_node(cur_node)->value_leaf.key == pos)
++            cur_node = cur_node->right;
++
++        if (!cur_node)
++            return;
++
++        shift_leaf_key_right(cur_node, m_right_leaf, size);
 +        m_valid_tree = false;
 +    }
 +
@@ -645,7 +713,7 @@ index 0000000..d5ab674
 +        return NULL;
 +    }
 +
-+    void shift_leaf_key(node_base_ptr& begin_node, node_base_ptr& end_node, key_type shift_value)
++    static void shift_leaf_key_left(node_base_ptr& begin_node, node_base_ptr& end_node, key_type shift_value)
 +    {
 +        node* cur_node_p = get_node(begin_node);
 +        node* end_node_p = get_node(end_node);
@@ -656,10 +724,41 @@ index 0000000..d5ab674
 +        }
 +    }
 +
++    static void shift_leaf_key_right(node_base_ptr& cur_node, node_base_ptr& end_node, key_type shift_value)
++    {
++        key_type end_node_key = get_node(end_node)->value_leaf.key;
++        while (get_node(cur_node) != get_node(end_node))
++        {
++            get_node(cur_node)->value_leaf.key += shift_value;
++            if (get_node(cur_node)->value_leaf.key < end_node_key)
++            {
++                // The node is still in-bound.  Keep shifting.
++                cur_node = cur_node->right;
++                continue;
++            }
++
++            // This node has been pushed outside the end node position.
++            // Remove all nodes that follows, and connect the previous node
++            // with the end node.
++
++            node_base_ptr last_node = cur_node->left;
++            while (get_node(cur_node) != get_node(end_node))
++            {
++                node_base_ptr next_node = cur_node->right;
++                disconnect_node(cur_node);
++                cur_node = next_node;
++            }
++            last_node->right = end_node;
++            end_node->left = last_node;
++            return;
++        }
++    }
++
 +private:
 +    node_base_ptr   m_root_node;
 +    node_base_ptr   m_left_leaf;
 +    node_base_ptr   m_right_leaf;
++    value_type      m_init_val;
 +    bool            m_valid_tree;
 +};
 +
@@ -981,10 +1080,10 @@ index 0000000..59749a0
 +#endif
 diff --git sc/inc/segmenttree.hxx sc/inc/segmenttree.hxx
 new file mode 100644
-index 0000000..f414002
+index 0000000..466f9ed
 --- /dev/null
 +++ sc/inc/segmenttree.hxx
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,89 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -1041,6 +1140,7 @@ index 0000000..f414002
 +    bool getValue(SCROW nRow);
 +    bool getRangeData(SCROW nRow, RangeData& rData);
 +    void removeSegment(SCROW nRow1, SCROW nRow2);
++    void insertSegment(SCROW nRow, SCROW nSize, bool bSkipStartBoundary);
 +
 +private:
 +    ::std::auto_ptr<ScFlatBoolSegmentsImpl> mpImpl;
@@ -1065,6 +1165,7 @@ index 0000000..f414002
 +    bool getValue(SCCOL nCol);
 +    bool getRangeData(SCCOL nCol, RangeData& rData);
 +    void removeSegment(SCCOL nCol1, SCCOL nCol2);
++    void insertSegment(SCCOL nCol, SCCOL nSize, bool bSkipStartBoundary);
 +
 +private:
 +    ::std::auto_ptr<ScFlatBoolSegmentsImpl> mpImpl;
@@ -1096,10 +1197,10 @@ index c631bb4..5fbec41 100644
  NOOPTFILES= \
 diff --git sc/source/core/data/segmenttree.cxx sc/source/core/data/segmenttree.cxx
 new file mode 100644
-index 0000000..b534de1
+index 0000000..be8e408
 --- /dev/null
 +++ sc/source/core/data/segmenttree.cxx
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,225 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -1155,6 +1256,7 @@ index 0000000..b534de1
 +    bool getValue(SCCOLROW nPos);
 +    bool getRangeData(SCCOLROW nPos, RangeData& rData);
 +    void removeSegment(SCCOLROW nPos1, SCCOLROW nPos2);
++    void insertSegment(SCCOLROW nPos, SCCOLROW nSize, bool bSkipStartBoundary);
 +
 +private:
 +    ScFlatBoolSegmentsImpl();
@@ -1224,6 +1326,11 @@ index 0000000..b534de1
 +    maSegments.shift_segment_left(nPos1, nPos2);
 +}
 +
++void ScFlatBoolSegmentsImpl::insertSegment(SCCOLROW nPos, SCCOLROW nSize, bool bSkipStartBoundary)
++{
++    maSegments.shift_segment_right(nPos, nSize, bSkipStartBoundary);
++}
++
 +// ============================================================================
 +
 +ScFlatBoolRowSegments::ScFlatBoolRowSegments() :
@@ -1267,6 +1374,11 @@ index 0000000..b534de1
 +    mpImpl->removeSegment(static_cast<SCCOLROW>(nRow1), static_cast<SCCOLROW>(nRow2));
 +}
 +
++void ScFlatBoolRowSegments::insertSegment(SCROW nRow, SCROW nSize, bool bSkipStartBoundary)
++{
++    mpImpl->insertSegment(static_cast<SCCOLROW>(nRow), static_cast<SCCOLROW>(nSize), bSkipStartBoundary);
++}
++
 +// ============================================================================
 +
 +ScFlatBoolColSegments::ScFlatBoolColSegments() :
@@ -1307,5 +1419,11 @@ index 0000000..b534de1
 +
 +void ScFlatBoolColSegments::removeSegment(SCCOL nCol1, SCCOL nCol2)
 +{
-+    mpImpl->removeSegment(static_cast<SCCOLROW>(nCol1), static_cast<SCCOLROW>(nCol1));
++    mpImpl->removeSegment(static_cast<SCCOLROW>(nCol1), static_cast<SCCOLROW>(nCol2));
 +}
++
++void ScFlatBoolColSegments::insertSegment(SCCOL nCol, SCCOL nSize, bool bSkipStartBoundary)
++{
++    mpImpl->insertSegment(static_cast<SCCOLROW>(nCol), static_cast<SCCOLROW>(nSize), bSkipStartBoundary);
++}
+
