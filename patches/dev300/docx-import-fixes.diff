@@ -1646,7 +1646,7 @@ index 18196b3..a3bde53 100644
  
      rToFill.Color = nLineColor;
 diff --git writerfilter/source/dmapper/DomainMapper.cxx writerfilter/source/dmapper/DomainMapper.cxx
-index 5758176..4fd3e61 100644
+index 5758176..0379b34 100644
 --- writerfilter/source/dmapper/DomainMapper.cxx
 +++ writerfilter/source/dmapper/DomainMapper.cxx
 @@ -28,9 +28,12 @@
@@ -2016,16 +2016,26 @@ index 5758176..4fd3e61 100644
      default:
          OSL_ENSURE( false, "which table is to be filled here?");
      }
-@@ -4581,7 +4619,7 @@ void DomainMapper::substream(Id rName, ::writerfilter::Reference<Stream>::Pointe
+@@ -4514,6 +4552,7 @@ void DomainMapper::substream(Id rName, ::writerfilter::Reference<Stream>::Pointe
+     dmapper_logger->startElement("substream");
+ #endif
+ 
++    m_pImpl->appendTableManager( );
+     m_pImpl->getTableManager().startLevel();
+ 
+     //->debug
+@@ -4581,8 +4620,9 @@ void DomainMapper::substream(Id rName, ::writerfilter::Reference<Stream>::Pointe
          m_pImpl->PopAnnotation();
      break;
      }
 -
 +    
      m_pImpl->getTableManager().endLevel();
++    m_pImpl->popTableManager( );
  
  #ifdef DEBUG_DOMAINMAPPER
-@@ -4818,5 +4856,10 @@ uno::Reference< text::XTextRange > DomainMapper::GetCurrentTextRange()
+     dmapper_logger->endElement("substream");
+@@ -4818,5 +4858,10 @@ uno::Reference< text::XTextRange > DomainMapper::GetCurrentTextRange()
      return pStyleSheets->getOrCreateCharStyle( rCharProperties );
  }
  
@@ -3152,7 +3162,7 @@ index c183252..d301acf 100644
  
  }}
 diff --git writerfilter/source/dmapper/DomainMapper_Impl.cxx writerfilter/source/dmapper/DomainMapper_Impl.cxx
-index 051a2b8..a7c10ce 100644
+index 051a2b8..0c8c037 100644
 --- writerfilter/source/dmapper/DomainMapper_Impl.cxx
 +++ writerfilter/source/dmapper/DomainMapper_Impl.cxx
 @@ -36,6 +36,8 @@
@@ -3190,16 +3200,17 @@ index 051a2b8..a7c10ce 100644
  
  #include <map>
  
-@@ -393,6 +401,8 @@ DomainMapper_Impl::DomainMapper_Impl(
+@@ -393,7 +401,8 @@ DomainMapper_Impl::DomainMapper_Impl(
          m_bIsFirstSection( true ),
          m_bIsColumnBreakDeferred( false ),
          m_bIsPageBreakDeferred( false ),
+-        m_TableManager( eDocumentType == DOCUMENT_OOXML ),
 +        m_bIsInShape( false ),
 +        m_bShapeContextAdded( false ),
-         m_TableManager( eDocumentType == DOCUMENT_OOXML ),
          m_nCurrentTabStopIndex( 0 ),
          m_sCurrentParaStyleId(),
-@@ -401,7 +411,9 @@ DomainMapper_Impl::DomainMapper_Impl(
+         m_bInStyleSheetImport( false ),
+@@ -401,8 +410,11 @@ DomainMapper_Impl::DomainMapper_Impl(
          m_bLineNumberingSet( false ),
          m_bIsInFootnoteProperties( true ),
          m_bIsCustomFtnMark( false ),
@@ -3208,20 +3219,35 @@ index 051a2b8..a7c10ce 100644
 +        m_bParaChanged( false ),
 +        m_bIsLastParaInSection( false )
  {
++    appendTableManager( );
      GetBodyText();
      uno::Reference< text::XTextAppend > xBodyTextAppend = uno::Reference< text::XTextAppend >( m_xBodyText, uno::UNO_QUERY );
-@@ -420,8 +432,10 @@ DomainMapper_Impl::DomainMapper_Impl(
+     m_aTextAppendStack.push(xBodyTextAppend);
+@@ -411,17 +423,20 @@ DomainMapper_Impl::DomainMapper_Impl(
+     uno::Reference< text::XTextAppendAndConvert > xBodyTextAppendAndConvert( m_xBodyText, uno::UNO_QUERY );
+     TableDataHandler_t::Pointer_t pTableHandler
+         (new DomainMapperTableHandler(xBodyTextAppendAndConvert, *this));
+-    m_TableManager.setHandler(pTableHandler);
++    getTableManager( ).setHandler(pTableHandler);
+ 
+-    m_TableManager.startLevel();
++    getTableManager( ).startLevel();
+ }
+ /*-- 01.09.2006 10:22:28---------------------------------------------------
+ 
    -----------------------------------------------------------------------*/
  DomainMapper_Impl::~DomainMapper_Impl()
  {
+-    m_TableManager.endLevel();
 +    RemoveLastParagraph( ); 
-     m_TableManager.endLevel();
++    getTableManager( ).endLevel();
++    popTableManager( );
  }
 +
  /*-------------------------------------------------------------------------
  
    -----------------------------------------------------------------------*/
-@@ -474,6 +488,28 @@ void DomainMapper_Impl::SetDocumentSettingsProperty( const ::rtl::OUString& rPro
+@@ -474,6 +489,28 @@ void DomainMapper_Impl::SetDocumentSettingsProperty( const ::rtl::OUString& rPro
          }
      }
  }
@@ -3250,7 +3276,7 @@ index 051a2b8..a7c10ce 100644
  /*-------------------------------------------------------------------------
  
    -----------------------------------------------------------------------*/
-@@ -524,6 +560,7 @@ void DomainMapper_Impl::PushListProperties(PropertyMapPtr pListProperties)
+@@ -524,6 +561,7 @@ void DomainMapper_Impl::PushListProperties(PropertyMapPtr pListProperties)
  void    DomainMapper_Impl::PopProperties(ContextType eId)
  {
      OSL_ENSURE(!m_aPropertyStacks[eId].empty(), "section stack already empty");
@@ -3258,7 +3284,7 @@ index 051a2b8..a7c10ce 100644
      m_aPropertyStacks[eId].pop();
      m_aContextStack.pop();
      if(!m_aContextStack.empty() && !m_aPropertyStacks[m_aContextStack.top()].empty())
-@@ -685,13 +722,13 @@ uno::Sequence< style::TabStop > DomainMapper_Impl::GetCurrentTabStopAndClear()
+@@ -685,13 +723,13 @@ uno::Sequence< style::TabStop > DomainMapper_Impl::GetCurrentTabStopAndClear()
    -----------------------------------------------------------------------*/
  uno::Any DomainMapper_Impl::GetPropertyFromStyleSheet(PropertyIds eId)
  {
@@ -3274,7 +3300,7 @@ index 051a2b8..a7c10ce 100644
      {
          //is there a tab stop set?
          if(pEntry->pProperties)
-@@ -725,10 +762,10 @@ void DomainMapper_Impl::deferBreak( BreakType deferredBreakType)
+@@ -725,10 +763,10 @@ void DomainMapper_Impl::deferBreak( BreakType deferredBreakType)
      switch (deferredBreakType)
      {
      case COLUMN_BREAK:
@@ -3287,7 +3313,7 @@ index 051a2b8..a7c10ce 100644
          break;
      default:
          return;
-@@ -831,11 +868,15 @@ void lcl_AddRangeAndStyle(
+@@ -831,16 +869,20 @@ void lcl_AddRangeAndStyle(
  /*-------------------------------------------------------------------------
  
    -----------------------------------------------------------------------*/
@@ -3305,7 +3331,13 @@ index 051a2b8..a7c10ce 100644
      ParagraphPropertyMap* pParaContext = dynamic_cast< ParagraphPropertyMap* >( pPropertyMap.get() );
      TextAppendContext& rAppendContext = m_aTextAppendStack.top();
      uno::Reference< text::XTextAppend >  xTextAppend = rAppendContext.xTextAppend;
-@@ -903,11 +944,11 @@ void DomainMapper_Impl::finishParagraph( PropertyMapPtr pPropertyMap )
+     PropertyNameSupplier& rPropNameSupplier = PropertyNameSupplier::GetPropertyNameSupplier();
+-    if(xTextAppend.is() && ! m_TableManager.isIgnore())
++    if(xTextAppend.is() && ! getTableManager( ).isIgnore())
+     {
+         try
+         {
+@@ -903,11 +945,11 @@ void DomainMapper_Impl::finishParagraph( PropertyMapPtr pPropertyMap )
                      try
                         {
                              //
@@ -3319,13 +3351,15 @@ index 051a2b8..a7c10ce 100644
                              {
                                  const ParagraphProperties* pStyleProperties = dynamic_cast<const ParagraphProperties*>( pParaStyle->pProperties.get() );
                                  beans::PropertyValue* pFrameProperties = aFrameProperties.getArray();
-@@ -1045,14 +1086,43 @@ void DomainMapper_Impl::finishParagraph( PropertyMapPtr pPropertyMap )
+@@ -1044,15 +1086,41 @@ void DomainMapper_Impl::finishParagraph( PropertyMapPtr pPropertyMap )
+                 }
                  uno::Reference< text::XTextRange > xTextRange =
                      xTextAppend->finishParagraph( aProperties );
-                 m_TableManager.handle(xTextRange);
+-                m_TableManager.handle(xTextRange);
 -            }
 -            else
 -            {
++                getTableManager( ).handle(xTextRange);
 +            
 +                // Set the anchor of the objects to the created paragraph
 +                while ( m_aAnchoredStack.size( ) > 0 && !m_bIsInShape )
@@ -3333,9 +3367,6 @@ index 051a2b8..a7c10ce 100644
 +                    uno::Reference< text::XTextContent > xObj = m_aAnchoredStack.top( );
 +                    try 
 +                    {
-+#if DEBUG
-+                        rtl::OUString sText( xTextRange->getString( ) );
-+#endif
 +                        xObj->attach( xTextRange );
 +                    } 
 +                    catch ( uno::RuntimeException& )
@@ -3367,7 +3398,7 @@ index 051a2b8..a7c10ce 100644
          }
          catch(const lang::IllegalArgumentException& rIllegal)
          {
-@@ -1062,7 +1132,7 @@ void DomainMapper_Impl::finishParagraph( PropertyMapPtr pPropertyMap )
+@@ -1062,7 +1130,7 @@ void DomainMapper_Impl::finishParagraph( PropertyMapPtr pPropertyMap )
          catch(const uno::Exception& rEx)
          {
              (void)rEx;
@@ -3376,7 +3407,20 @@ index 051a2b8..a7c10ce 100644
          }
      }
  }
-@@ -1099,35 +1169,9 @@ void DomainMapper_Impl::appendTextPortion( const ::rtl::OUString& rString, Prope
+@@ -1091,45 +1159,23 @@ util::DateTime lcl_DateStringToDateTime( const ::rtl::OUString& rDateTime )
+ }
+ void DomainMapper_Impl::appendTextPortion( const ::rtl::OUString& rString, PropertyMapPtr pPropertyMap )
+ {
++#if DEBUG
++    clog << "DomainMapper_Impl::appendTextPortion( ) - ";
++    clog << rtl::OUStringToOString( rString, RTL_TEXTENCODING_UTF8 ).getStr( ) << endl;
++#endif
+     uno::Reference< text::XTextAppend >  xTextAppend = m_aTextAppendStack.top().xTextAppend;
+-    if(xTextAppend.is() && ! m_TableManager.isIgnore())
++    if(xTextAppend.is() && ! getTableManager( ).isIgnore())
+     {
+         try
+         {
              uno::Reference< text::XTextRange > xTextRange =
                  xTextAppend->appendTextPortion
                  (rString, pPropertyMap->GetPropertyValues());
@@ -3412,9 +3456,21 @@ index 051a2b8..a7c10ce 100644
 -            }
 +            m_bParaChanged = true;
  
-             //m_TableManager.handle(xTextRange);
+-            //m_TableManager.handle(xTextRange);
++            //getTableManager( ).handle(xTextRange);
          }
-@@ -1167,6 +1211,7 @@ void DomainMapper_Impl::appendTextContent(
+         catch(const lang::IllegalArgumentException& rEx)
+         {
+@@ -1153,7 +1199,7 @@ void DomainMapper_Impl::appendTextContent(
+ {
+     uno::Reference< text::XTextAppendAndConvert >  xTextAppendAndConvert( m_aTextAppendStack.top().xTextAppend, uno::UNO_QUERY );
+     OSL_ENSURE( xTextAppendAndConvert.is(), "trying to append a text content without XTextAppendAndConvert" );
+-    if(xTextAppendAndConvert.is() && ! m_TableManager.isIgnore())
++    if(xTextAppendAndConvert.is() && ! getTableManager( ).isIgnore())
+     {
+         try
+         {
+@@ -1167,6 +1213,7 @@ void DomainMapper_Impl::appendTextContent(
          }
      }
  }
@@ -3422,7 +3478,7 @@ index 051a2b8..a7c10ce 100644
  /*-- 24.04.2008 08:38:07---------------------------------------------------
  
    -----------------------------------------------------------------------*/
-@@ -1319,18 +1364,7 @@ void DomainMapper_Impl::PopPageHeaderFooter()
+@@ -1319,18 +1366,7 @@ void DomainMapper_Impl::PopPageHeaderFooter()
  {
      //header and footer always have an empty paragraph at the end
      //this has to be removed
@@ -3442,7 +3498,7 @@ index 051a2b8..a7c10ce 100644
      m_aTextAppendStack.pop();
  }
  /*-- 24.05.2007 14:22:28---------------------------------------------------
-@@ -1351,31 +1385,99 @@ void DomainMapper_Impl::PushFootOrEndnote( bool bIsFootnote )
+@@ -1351,31 +1387,99 @@ void DomainMapper_Impl::PushFootOrEndnote( bool bIsFootnote )
          {
              xFootnote->setLabel( ::rtl::OUString( pTopContext->GetFootnoteSymbol() ) );
          }
@@ -3559,7 +3615,7 @@ index 051a2b8..a7c10ce 100644
  }
  
  /*-- 22.12.2008 13:45:15---------------------------------------------------
-@@ -1416,57 +1518,58 @@ void DomainMapper_Impl::PopAnnotation()
+@@ -1416,57 +1520,58 @@ void DomainMapper_Impl::PopAnnotation()
      m_xAnnotationField.clear();
  
  }
@@ -3656,7 +3712,7 @@ index 051a2b8..a7c10ce 100644
  }
  /*-- 12.09.2006 08:07:55---------------------------------------------------
  
-@@ -2952,6 +3055,7 @@ void DomainMapper_Impl::CloseFieldCommand()
+@@ -2952,6 +3057,7 @@ void DomainMapper_Impl::CloseFieldCommand()
                          bool bHyperlinks = false;
                          bool bFromOutline = false;
                          bool bFromEntries = false;
@@ -3664,7 +3720,7 @@ index 051a2b8..a7c10ce 100644
                          ::rtl::OUString sTemplate;
                          ::rtl::OUString sChapterNoSeparator;
      //                  \a Builds a table of figures but does not include the captions's label and number
-@@ -3001,6 +3105,10 @@ void DomainMapper_Impl::CloseFieldCommand()
+@@ -3001,6 +3107,10 @@ void DomainMapper_Impl::CloseFieldCommand()
                          if( lcl_FindInCommand( pContext->GetCommand(), 'o', sValue ))
                          {
                              bFromOutline = true;
@@ -3675,7 +3731,7 @@ index 051a2b8..a7c10ce 100644
                          }
      //                  \p Defines the separator between the table entry and its page number
                          if( lcl_FindInCommand( pContext->GetCommand(), 'p', sValue ))
-@@ -3048,6 +3156,7 @@ void DomainMapper_Impl::CloseFieldCommand()
+@@ -3048,6 +3158,7 @@ void DomainMapper_Impl::CloseFieldCommand()
                          xTOC->setPropertyValue(rPropNameSupplier.GetName( PROP_TITLE ), uno::makeAny(::rtl::OUString()));
                          if( !bTableOfFigures )
                          {
@@ -3683,7 +3739,7 @@ index 051a2b8..a7c10ce 100644
                              xTOC->setPropertyValue( rPropNameSupplier.GetName( PROP_CREATE_FROM_OUTLINE ), uno::makeAny( bFromOutline ));
                              xTOC->setPropertyValue( rPropNameSupplier.GetName( PROP_CREATE_FROM_MARKS ), uno::makeAny( bFromEntries ));
                              if( sTemplate.getLength() )
-@@ -3531,14 +3640,98 @@ bool DomainMapper_Impl::ExecuteFrameConversion()
+@@ -3531,14 +3642,98 @@ bool DomainMapper_Impl::ExecuteFrameConversion()
      }
      return bRet;
  }
@@ -3786,7 +3842,7 @@ index 051a2b8..a7c10ce 100644
  
  }}
 diff --git writerfilter/source/dmapper/DomainMapper_Impl.hxx writerfilter/source/dmapper/DomainMapper_Impl.hxx
-index f4dfaf0..52a53b4 100644
+index f4dfaf0..ab0a561 100644
 --- writerfilter/source/dmapper/DomainMapper_Impl.hxx
 +++ writerfilter/source/dmapper/DomainMapper_Impl.hxx
 @@ -34,6 +34,7 @@
@@ -3847,7 +3903,17 @@ index f4dfaf0..52a53b4 100644
  
      LineNumberSettings                                                              m_aLineNumberSettings;
  
-@@ -293,6 +310,7 @@ private:
+@@ -281,7 +298,8 @@ private:
+     _PageMar                                                                        m_aPageMargins;
+ 
+ 
+-    DomainMapperTableManager m_TableManager;
++    // TableManagers are stacked: one for each stream to avoid any confusion
++    std::stack< boost::shared_ptr< DomainMapperTableManager > > m_aTableManagers;
+ 
+     //each context needs a stack of currently used attributes
+     FIB                     m_aFIB;
+@@ -293,6 +311,7 @@ private:
      StyleSheetTablePtr      m_pStyleSheetTable;
      ThemeTablePtr           m_pThemeTable;
      GraphicImportPtr        m_pGraphicImport;
@@ -3855,7 +3921,7 @@ index f4dfaf0..52a53b4 100644
  
      PropertyMapPtr                  m_pTopContext;
  
-@@ -311,14 +329,14 @@ private:
+@@ -311,14 +330,14 @@ private:
      ::com::sun::star::uno::Reference< text::XTextRange >      m_xFrameStartRange;
      ::com::sun::star::uno::Reference< text::XTextRange >      m_xFrameEndRange;
  
@@ -3877,7 +3943,7 @@ index f4dfaf0..52a53b4 100644
  
      //annotation import
      uno::Reference< beans::XPropertySet >                                      m_xAnnotationField;
-@@ -357,6 +375,18 @@ public:
+@@ -357,6 +376,18 @@ public:
      }
      void SetDocumentSettingsProperty( const ::rtl::OUString& rPropName, const uno::Any& rValue );
  
@@ -3896,7 +3962,7 @@ index f4dfaf0..52a53b4 100644
      void deferBreak( BreakType deferredBreakType );
      bool isBreakDeferred( BreakType deferredBreakType );
      void clearDeferredBreaks();
-@@ -412,6 +442,13 @@ public:
+@@ -412,6 +443,13 @@ public:
          return m_pThemeTable;
      }
  
@@ -3910,7 +3976,7 @@ index f4dfaf0..52a53b4 100644
      GraphicImportPtr GetGraphicImport( GraphicImportType eGraphicImportType );
      void            ResetGraphicImport();
      // this method deletes the current m_pGraphicImport after import
-@@ -432,10 +469,8 @@ public:
+@@ -432,10 +470,8 @@ public:
      void        SetAnyTableImport( bool bSet ) { m_bInAnyTableImport = bSet;}
      bool        IsAnyTableImport()const { return m_bInAnyTableImport;}
  
@@ -3922,7 +3988,34 @@ index f4dfaf0..52a53b4 100644
  
      void PushPageHeader(SectionPropertyMap::PageType eType);
      void PushPageFooter(SectionPropertyMap::PageType eType);
-@@ -495,19 +530,17 @@ public:
+@@ -466,7 +502,25 @@ public:
+ 
+     void AddBookmark( const ::rtl::OUString& rBookmarkName, const ::rtl::OUString& rId );
+ 
+-    DomainMapperTableManager& getTableManager() { return m_TableManager; }
++    DomainMapperTableManager& getTableManager() 
++    { 
++        boost::shared_ptr< DomainMapperTableManager > pMngr = m_aTableManagers.top(); 
++        return *pMngr.get( );
++    }
++
++    void appendTableManager( )
++    {
++        boost::shared_ptr< DomainMapperTableManager > pMngr( 
++                new DomainMapperTableManager( m_eDocumentType == DOCUMENT_OOXML ) );
++        m_aTableManagers.push( pMngr );
++    }
++
++    void popTableManager( )
++    {
++        if ( m_aTableManagers.size( ) > 0 )
++            m_aTableManagers.pop( );
++    }
++
+ 
+     void SetLineNumbering( sal_Int32 nLnnMod, sal_Int32 nLnc, sal_Int32 ndxaLnn );
+     bool IsLineNumberingSet() const {return m_bLineNumberingSet;}
+@@ -495,19 +549,17 @@ public:
          );
      bool ExecuteFrameConversion();
  
