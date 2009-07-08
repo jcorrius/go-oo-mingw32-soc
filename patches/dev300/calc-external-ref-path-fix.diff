@@ -1,0 +1,291 @@
+diff --git sc/inc/externalrefmgr.hxx sc/inc/externalrefmgr.hxx
+index 1ca3bac..b9bbaa9 100644
+--- sc/inc/externalrefmgr.hxx
++++ sc/inc/externalrefmgr.hxx
+@@ -403,10 +403,13 @@ public:
+     /** Source document meta-data container. */
+     struct SrcFileData
+     {
+-        String maFileName;
++        String maFileName;      /// original file name as loaded from the file.
++        String maRealFileName;  /// file name created from the relative name.
+         String maRelativeName;
+         String maFilterName;
+         String maFilterOptions;
++
++        void maybeCreateRealFileName(const String& rOwnDocName);
+     };
+ 
+ public:
+@@ -551,7 +554,7 @@ public:
+      */
+     void convertToAbsName(String& rFile) const;
+     sal_uInt16 getExternalFileId(const String& rFile);
+-    const String* getExternalFileName(sal_uInt16 nFileId) const;
++    const String* getExternalFileName(sal_uInt16 nFileId);
+     bool hasExternalFile(sal_uInt16 nFileId) const;
+     bool hasExternalFile(const String& rFile) const;
+     const SrcFileData* getExternalFileData(sal_uInt16 nFileId) const;
+@@ -560,8 +563,15 @@ public:
+     const String* getRealRangeName(sal_uInt16 nFileId, const String& rRangeName) const;
+     void refreshNames(sal_uInt16 nFileId);
+     void breakLink(sal_uInt16 nFileId);
+-    void switchSrcFile(sal_uInt16 nFileId, const String& rNewFile);
++    void switchSrcFile(sal_uInt16 nFileId, const String& rNewFile, const String& rNewFilter);
+ 
++    /** 
++     * Set a relative file path for the specified file ID.  Note that the 
++     * caller must ensure that the passed URL is a valid relative URL. 
++     *
++     * @param nFileId file ID for an external document
++     * @param rRelUrl relative URL
++     */
+     void setRelativeFileName(sal_uInt16 nFileId, const String& rRelUrl);
+ 
+     /**
+@@ -581,9 +591,12 @@ public:
+     /**
+      * Re-generates relative names for all stored source files.  This is
+      * necessary when exporting to an ods document, to ensure that all source
+-     * files have their respective relative names for xlink:href export.
++     * files have their respective relative names for xlink:href export. 
++     *  
++     * @param rBaseFileUrl Absolute URL of the content.xml fragment of the 
++     *                     document being exported.
+      */
+-    void resetSrcFileData();
++    void resetSrcFileData(const String& rBaseFileUrl);
+ 
+     /** 
+      * Update a single referencing cell position.
+@@ -650,6 +663,19 @@ private:
+ 
+     void maybeLinkExternalFile(sal_uInt16 nFileId);
+ 
++    /** 
++     * Try to create a "real" file name from the relative path.  The original
++     * file name may not point to the real document when the referencing and 
++     * referenced documents have been moved. 
++     *  
++     * For the real file name to be created, the relative name should not be 
++     * empty before calling this method, or the real file name will not be 
++     * created. 
++     *
++     * @param nFileId file ID for an external document
++     */
++    void maybeCreateRealFileName(sal_uInt16 nFileId);
++
+     bool compileTokensByCell(const ScAddress& rCell);
+ 
+     /**
+diff --git sc/source/filter/xml/xmlexprt.cxx sc/source/filter/xml/xmlexprt.cxx
+index 0f8c609..dd246b6 100644
+--- sc/source/filter/xml/xmlexprt.cxx
++++ sc/source/filter/xml/xmlexprt.cxx
+@@ -3462,7 +3462,7 @@ void ScXMLExport::WriteExternalRefCaches()
+         return;
+ 
+     ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
+-    pRefMgr->resetSrcFileData();
++    pRefMgr->resetSrcFileData(GetOrigFileName());
+     sal_uInt16 nCount = pRefMgr->getExternalFileCount();
+     for (sal_uInt16 nFileId = 0; nFileId < nCount; ++nFileId)
+     {
+diff --git sc/source/filter/xml/xmlexternaltabi.cxx sc/source/filter/xml/xmlexternaltabi.cxx
+index ca94d26..7ddc42e 100644
+--- sc/source/filter/xml/xmlexternaltabi.cxx
++++ sc/source/filter/xml/xmlexternaltabi.cxx
+@@ -100,6 +100,27 @@ SvXMLImportContext* ScXMLExternalRefTabSourceContext::CreateChildContext(
+     return new SvXMLImportContext(GetImport(), nPrefix, rLocalName);
+ }
+ 
++/** 
++ * Make sure the URL is a valid relative URL, mainly to avoid storing 
++ * absolute URL as relative URL by accident.  For now, we only check the 
++ * first two characters which are assumed to be always '..', because the 
++ * relative URL for an external document is always in reference to the 
++ * content.xml fragment of the original document. 
++ */
++static bool lcl_isValidRelativeURL(const OUString& rUrl)
++{
++    const sal_Unicode* p = rUrl.getStr();
++    sal_Int32 n = rUrl.getLength();
++    for (sal_Int32 i = 0; i < n; ++i)
++    {
++        sal_Unicode c = p[i];
++        if (i < 2 && c != '.')
++            // the path must begin with '..'
++            return false;
++    }
++    return true;
++}
++
+ void ScXMLExternalRefTabSourceContext::EndElement()
+ {
+     ScDocument* pDoc = mrScImport.GetDocument();
+@@ -107,7 +128,7 @@ void ScXMLExternalRefTabSourceContext::EndElement()
+         return;
+ 
+     ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
+-    if (!maRelativeUrl.equals(mrExternalRefInfo.maFileUrl))
++    if (lcl_isValidRelativeURL(maRelativeUrl))
+         pRefMgr->setRelativeFileName(mrExternalRefInfo.mnFileId, maRelativeUrl);
+     pRefMgr->setFilterData(mrExternalRefInfo.mnFileId, maFilterName, maFilterOptions);
+ }
+diff --git sc/source/ui/docshell/externalrefmgr.cxx sc/source/ui/docshell/externalrefmgr.cxx
+index 7032b2d..b831e93 100644
+--- sc/source/ui/docshell/externalrefmgr.cxx
++++ sc/source/ui/docshell/externalrefmgr.cxx
+@@ -989,7 +989,7 @@ void ScExternalRefLink::DataChanged(const String& /*rMimeType*/, const Any& /*rV
+     else
+     {
+         // The source document has changed.
+-        pMgr->switchSrcFile(mnFileId, aFile);
++        pMgr->switchSrcFile(mnFileId, aFile, aFilter);
+         maFilterName = aFilter;
+     }
+ }
+@@ -1824,24 +1824,17 @@ SfxObjectShellRef ScExternalRefManager::loadSrcDocument(sal_uInt16 nFileId, Stri
+     if (!pFileData)
+         return NULL;
+ 
++    // Always load the document by using the path created from the relative
++    // path.  If the referenced document is not there, simply exit.  The
++    // original file name should be used only when the relative path is not
++    // given.
+     String aFile = pFileData->maFileName;
++    maybeCreateRealFileName(nFileId);
++    if (pFileData->maRealFileName.Len())
++        aFile = pFileData->maRealFileName;
++    
+     if (!isFileLoadable(aFile))
+-    {
+-        // The original file path is not loadable.  Try the relative path.
+-        // Note that the path is relative to the content.xml substream which
+-        // is one-level higher than the file itself.
+-
+-        if (!pFileData->maRelativeName.Len())
+-            return NULL;
+-
+-        INetURLObject aBaseURL(getOwnDocumentName());
+-        aBaseURL.insertName(OUString::createFromAscii("content.xml"));
+-        bool bWasAbs = false;
+-        aFile = aBaseURL.smartRel2Abs(pFileData->maRelativeName, bWasAbs).GetMainURL(INetURLObject::NO_DECODE);
+-        if (!isFileLoadable(aFile))
+-            // Ok, I've tried both paths but no success.  Bail out.
+-            return NULL;
+-    }
++        return NULL;
+ 
+     String aOptions;
+     ScDocumentLoader::GetFilterName(aFile, rFilter, aOptions, true, false);
+@@ -1893,6 +1886,9 @@ SfxObjectShellRef ScExternalRefManager::loadSrcDocument(sal_uInt16 nFileId, Stri
+ 
+ bool ScExternalRefManager::isFileLoadable(const String& rFile) const
+ {
++    if (!rFile.Len())
++        return false;
++
+     if (isOwnDocument(rFile))
+         return false;
+ 
+@@ -1927,6 +1923,32 @@ void ScExternalRefManager::maybeLinkExternalFile(sal_uInt16 nFileId)
+     maLinkedDocs.insert(LinkedDocMap::value_type(nFileId, true));
+ }
+ 
++void ScExternalRefManager::SrcFileData::maybeCreateRealFileName(const String& rOwnDocName)
++{
++    if (!maRelativeName.Len())
++        // No relative path given.  Nothing to do.
++        return;
++
++    if (maRealFileName.Len())
++        // Real file name already created.  Nothing to do.
++        return;
++
++    // Formulate the absolute file path from the relative path.
++    const String& rRelPath = maRelativeName;
++    INetURLObject aBaseURL(rOwnDocName);
++    aBaseURL.insertName(OUString::createFromAscii("content.xml"));
++    bool bWasAbs = false;
++    maRealFileName = aBaseURL.smartRel2Abs(rRelPath, bWasAbs).GetMainURL(INetURLObject::NO_DECODE);
++}
++
++void ScExternalRefManager::maybeCreateRealFileName(sal_uInt16 nFileId)
++{
++    if (nFileId >= maSrcFiles.size())
++        return;
++
++    maSrcFiles[nFileId].maybeCreateRealFileName(getOwnDocumentName());
++}
++
+ bool ScExternalRefManager::compileTokensByCell(const ScAddress& rCell)
+ {
+     ScBaseCell* pCell;
+@@ -1997,12 +2019,17 @@ sal_uInt16 ScExternalRefManager::getExternalFileId(const String& rFile)
+     return static_cast<sal_uInt16>(maSrcFiles.size() - 1);
+ }
+ 
+-const String* ScExternalRefManager::getExternalFileName(sal_uInt16 nFileId) const
++const String* ScExternalRefManager::getExternalFileName(sal_uInt16 nFileId)
+ {
+     if (nFileId >= maSrcFiles.size())
+         return NULL;
+ 
+-    return &maSrcFiles[nFileId].maFileName;
++    maybeCreateRealFileName(nFileId);
++
++    if (maSrcFiles[nFileId].maRealFileName.Len())
++        return &maSrcFiles[nFileId].maRealFileName;
++    else
++        return &maSrcFiles[nFileId].maFileName;
+ }
+ 
+ bool ScExternalRefManager::hasExternalFile(sal_uInt16 nFileId) const
+@@ -2071,10 +2098,17 @@ void ScExternalRefManager::breakLink(sal_uInt16 nFileId)
+     notifyAllLinkListeners(nFileId, LINK_BROKEN);
+ }
+ 
+-void ScExternalRefManager::switchSrcFile(sal_uInt16 nFileId, const String& rNewFile)
++void ScExternalRefManager::switchSrcFile(sal_uInt16 nFileId, const String& rNewFile, const String& rNewFilter)
+ {
+     maSrcFiles[nFileId].maFileName = rNewFile;
+     maSrcFiles[nFileId].maRelativeName.Erase();
++    maSrcFiles[nFileId].maRealFileName.Erase();
++    if (!maSrcFiles[nFileId].maFilterName.Equals(rNewFilter))
++    {
++        // Filter type has changed.
++        maSrcFiles[nFileId].maFilterName = rNewFilter;
++        maSrcFiles[nFileId].maFilterOptions.Erase();
++    }
+     refreshNames(nFileId);
+ }
+ 
+@@ -2108,19 +2142,18 @@ bool ScExternalRefManager::hasExternalData() const
+     return !maSrcFiles.empty();
+ }
+ 
+-void ScExternalRefManager::resetSrcFileData()
++void ScExternalRefManager::resetSrcFileData(const String& rBaseFileUrl)
+ {
+-    INetURLObject aBaseURL(getOwnDocumentName());
+-    aBaseURL.insertName(OUString::createFromAscii("content.xml"));
+-    String aBaseUrlStr = aBaseURL.GetMainURL(INetURLObject::NO_DECODE);
+     for (vector<SrcFileData>::iterator itr = maSrcFiles.begin(), itrEnd = maSrcFiles.end();
+           itr != itrEnd; ++itr)
+     {
+-        if (!itr->maRelativeName.Len())
+-        {
+-            itr->maRelativeName = URIHelper::simpleNormalizedMakeRelative(
+-                aBaseUrlStr, itr->maFileName);
+-        }
++        // Re-generate relative file name from the absolute file name.
++        String aAbsName = itr->maRealFileName;
++        if (!aAbsName.Len())
++            aAbsName = itr->maFileName;
++
++        itr->maRelativeName = URIHelper::simpleNormalizedMakeRelative(
++            rBaseFileUrl, aAbsName);
+     }
+ }
+ 
